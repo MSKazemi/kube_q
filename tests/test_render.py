@@ -12,7 +12,6 @@ import pytest
 import kube_q.render as render_mod
 from kube_q.render import _should_use_pager, c, set_output_plain
 
-
 # ── set_output_plain ──────────────────────────────────────────────────────────
 
 

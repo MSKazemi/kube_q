@@ -12,10 +12,13 @@ from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.text import Text
 
-from kube_q.render import console, print_response, _plain_output
+from kube_q.render import _plain_output, console, print_response
 
 # ── Retry config ───────────────────────────────────────────────────────────────
 _QUERY_RETRY_DELAYS = (2, 5, 10)  # seconds between attempts (3 total)
+
+# ── DNS error keywords ─────────────────────────────────────────────────────────
+_DNS_KEYWORDS = ("Name or service not known", "nodename nor servname", "getaddrinfo")
 
 # ── Module logger ──────────────────────────────────────────────────────────────
 _logger = logging.getLogger(__name__)
@@ -36,7 +39,7 @@ def _describe_error(url: str, exc: Exception) -> str:
     """Return a human-readable reason for a connection failure."""
     if isinstance(exc, httpx.ConnectError):
         msg = str(exc)
-        if any(k in msg for k in ("Name or service not known", "nodename nor servname", "getaddrinfo")):
+        if any(k in msg for k in _DNS_KEYWORDS):
             host = url.split("//")[-1].split("/")[0]
             return f"DNS resolution failed for '{host}'"
         return f"Connection refused — nothing is listening at {url}"
@@ -334,7 +337,7 @@ def check_health(
         return False, f"HTTP {r.status_code} from {url}/healthz"
     except httpx.ConnectError as e:
         msg = str(e)
-        if any(k in msg for k in ("Name or service not known", "nodename nor servname", "getaddrinfo")):
+        if any(k in msg for k in _DNS_KEYWORDS):
             host = url.split("//")[-1].split("/")[0]
             return False, f"DNS resolution failed for '{host}' — check the hostname or /etc/hosts"
         return False, f"Connection refused — nothing is listening at {url}"

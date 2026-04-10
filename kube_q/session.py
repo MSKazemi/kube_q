@@ -22,9 +22,8 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
-from kube_q.render import console, _print_logo, _fmt_help, print_response
-from kube_q.transport import stream_query, non_stream_query, check_health
-
+from kube_q.render import _fmt_help, _print_logo, console
+from kube_q.transport import check_health, non_stream_query, stream_query
 
 # ── Prompt session config ─────────────────────────────────────────────────────
 
@@ -208,14 +207,19 @@ def run_repl(
     _pending_retry: str = ""  # pre-fills next prompt after a failed send
 
     if show_header and not quiet:
-        connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout)
+        connected, reason = check_health(
+            url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout
+        )
 
         if not connected:
             deadline = time.monotonic() + startup_retry_timeout
 
             console.print(f"[yellow]Cannot reach {url}/healthz[/yellow]")
             console.print(f"[dim]  Reason: {reason}[/dim]")
-            console.print(f"[dim]  Retrying every {startup_retry_interval}s for up to {startup_retry_timeout // 60} min…[/dim]\n")
+            console.print(
+                f"[dim]  Retrying every {startup_retry_interval}s "
+                f"for up to {startup_retry_timeout // 60} min…[/dim]\n"
+            )
 
             attempt = 0
             try:
@@ -235,9 +239,13 @@ def run_repl(
                     ):
                         time.sleep(min(startup_retry_interval, max(0, remaining)))
 
-                    connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout)
+                    connected, reason = check_health(
+                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout
+                    )
             except KeyboardInterrupt:
-                console.print("\n[dim]Startup wait cancelled — continuing without API connection.[/dim]\n")
+                console.print(
+                    "\n[dim]Startup wait cancelled — continuing without API connection.[/dim]\n"
+                )
                 connected = False
                 reason = "Cancelled by user"
 
@@ -248,7 +256,9 @@ def run_repl(
                     f"[red]Still cannot reach {url}/healthz.[/red]"
                 )
                 console.print(f"[dim]  Last reason: {reason}[/dim]")
-                console.print("[dim]  Continuing anyway — queries will fail until the API is up.[/dim]\n")
+                console.print(
+                    "[dim]  Continuing anyway — queries will fail until the API is up.[/dim]\n"
+                )
 
         _print_logo(connected=connected)
         console.print(Panel.fit(
@@ -295,8 +305,11 @@ def run_repl(
             state.messages = []
             state.hitl_pending = False
             state.pending_action_id = None
-            cleared_note = f"  [dim]({cleared} message{'s' if cleared != 1 else ''} cleared)[/dim]" if cleared else ""
-            console.print(f"[dim]New conversation started:[/dim] {state.conversation_id}{cleared_note}")
+            s = "s" if cleared != 1 else ""
+            cleared_note = f"  [dim]({cleared} message{s} cleared)[/dim]" if cleared else ""
+            console.print(
+                f"[dim]New conversation started:[/dim] {state.conversation_id}{cleared_note}"
+            )
             continue
 
         if user_input.lower() == "/id":
@@ -304,8 +317,17 @@ def run_repl(
             continue
 
         if user_input.lower() == "/state":
-            ns_line = f"  [dim]Namespace    [/dim] {state.current_namespace}" if state.current_namespace else f"  [dim]Namespace    [/dim] [dim italic](none)[/dim]"
-            hitl_line = f"  [dim]HITL pending [/dim] [bold yellow]yes — action_id={state.pending_action_id}[/bold yellow]" if state.hitl_pending else f"  [dim]HITL pending [/dim] no"
+            ns = state.current_namespace
+            ns_line = (
+                f"  [dim]Namespace    [/dim] {ns}"
+                if ns
+                else "  [dim]Namespace    [/dim] [dim italic](none)[/dim]"
+            )
+            hitl_line = (
+                f"  [dim]HITL pending [/dim] [bold yellow]yes — action_id={state.pending_action_id}[/bold yellow]"  # noqa: E501
+                if state.hitl_pending
+                else "  [dim]HITL pending [/dim] no"
+            )
             console.print(Panel(
                 f"  [dim]Conversation [/dim] {state.conversation_id}\n"
                 f"  [dim]User ID      [/dim] {state.user_id}\n"
@@ -350,8 +372,8 @@ def run_repl(
                         _r = _hc.get(f"{url}/v1/namespaces/{ns_arg}", headers=_ns_headers)
                     if _r.status_code not in (200, 204):
                         console.print(
-                            f"[yellow]Warning: namespace '{ns_arg}' not found — set anyway?[/yellow] "
-                            "(namespace set regardless)"
+                            f"[yellow]Warning: namespace '{ns_arg}' not found"
+                            " — set anyway?[/yellow] (namespace set regardless)"
                         )
                 except Exception:
                     pass

@@ -6,7 +6,6 @@ Covers: _resolve_attachments (bare path, quoted path, missing file,
         (explicit arg, from existing file, auto-generate).
 """
 
-import os
 from pathlib import Path
 
 import pytest

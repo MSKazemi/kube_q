@@ -7,7 +7,6 @@ import sys
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.text import Text
 
 # ── Rich console ──────────────────────────────────────────────────────────────
 
@@ -98,8 +97,8 @@ def _fmt_help() -> None:
         # ── Sending messages ──────────────────────────────────────────────────
         "[bold cyan]Sending messages[/bold cyan]\n\n"
         "  [yellow]Enter[/yellow]              Send your message\n"
-        "  [yellow]Alt+Enter[/yellow]          Insert a newline  [dim](hold Alt, press Enter)[/dim]\n"
-        "  [yellow]Esc  →  Enter[/yellow]      Insert a newline  [dim](press Esc, release, then Enter — works everywhere)[/dim]\n"
+        "  [yellow]Alt+Enter[/yellow]          Insert a newline  [dim](hold Alt, press Enter)[/dim]\n"  # noqa: E501
+        "  [yellow]Esc  →  Enter[/yellow]      Insert a newline  [dim](press Esc, release, then Enter — works everywhere)[/dim]\n"  # noqa: E501
         "  Paste multi-line text freely — all newlines are preserved before you send\n\n"
 
         # ── File attachments ──────────────────────────────────────────────────
@@ -117,7 +116,7 @@ def _fmt_help() -> None:
         # ── Editing shortcuts ─────────────────────────────────────────────────
         "[bold cyan]Editing[/bold cyan]\n\n"
         "  [yellow]Tab[/yellow]                Auto-complete slash commands\n"
-        "  [yellow]↑ / ↓[/yellow]             Scroll through previous messages  [dim](history)[/dim]\n"
+        "  [yellow]↑ / ↓[/yellow]             Scroll through previous messages  [dim](history)[/dim]\n"  # noqa: E501
         "  [yellow]Ctrl+A[/yellow]             Jump to start of line\n"
         "  [yellow]Ctrl+E[/yellow]             Jump to end of line\n"
         "  [yellow]Ctrl+W[/yellow]             Delete previous word\n"
@@ -127,10 +126,10 @@ def _fmt_help() -> None:
 
         # ── Conversation commands ─────────────────────────────────────────────
         "[bold cyan]Conversation commands[/bold cyan]\n\n"
-        "  [yellow]/new[/yellow]               Start a fresh conversation  [dim](new ID, clears history)[/dim]\n"
+        "  [yellow]/new[/yellow]               Start a fresh conversation  [dim](new ID, clears history)[/dim]\n"  # noqa: E501
         "  [yellow]/id[/yellow]                Show the current conversation ID\n"
-        "  [yellow]/state[/yellow]             Show full session state  [dim](ID, namespace, HITL flag)[/dim]\n"
-        "  [yellow]/save[/yellow]              Save conversation to [dim]kube-q-TIMESTAMP.md[/dim]\n"
+        "  [yellow]/state[/yellow]             Show full session state  [dim](ID, namespace, HITL flag)[/dim]\n"  # noqa: E501
+        "  [yellow]/save[/yellow]              Save conversation to [dim]kube-q-TIMESTAMP.md[/dim]\n"  # noqa: E501
         "  [yellow]/save <file>[/yellow]        Save conversation to a specific file\n\n"
 
         # ── Namespace ─────────────────────────────────────────────────────────
@@ -160,7 +159,7 @@ def _fmt_help() -> None:
         "  [dim]kq --ca-cert /path/cert.pem[/dim]   Custom CA certificate for TLS\n"
         "  [dim]kq --output plain[/dim]            Plain text output (no markdown)\n"
         "  [dim]kq --no-stream[/dim]               Wait for full response instead of streaming\n"
-        "  [dim]kq --no-banner[/dim]               Suppress logo  [dim](useful for screen recordings)[/dim]\n"
+        "  [dim]kq --no-banner[/dim]               Suppress logo  [dim](useful for screen recordings)[/dim]\n"  # noqa: E501
         "  [dim]kq --debug[/dim]                   Show raw HTTP request/response log\n"
         "  [dim]kq --version[/dim]                 Print version and exit\n"
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"

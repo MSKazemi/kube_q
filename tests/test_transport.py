@@ -10,7 +10,6 @@ import json
 from unittest.mock import patch
 
 import httpx
-import pytest
 import respx
 
 from kube_q.transport import (

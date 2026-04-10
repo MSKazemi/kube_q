@@ -59,13 +59,14 @@ Attaching files:
 import argparse
 import os
 import uuid
-from importlib.metadata import version as _pkg_version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from urllib.parse import urlparse
 
 from kube_q.config import load_config, setup_logging
 from kube_q.render import console, set_output_plain
-from kube_q.transport import set_debug, stream_query, non_stream_query
-from kube_q.session import SessionState, _load_or_create_user_id, run_repl
+from kube_q.session import _load_or_create_user_id, run_repl
+from kube_q.transport import non_stream_query, set_debug, stream_query
 
 try:
     __version__ = _pkg_version("kube-q")
