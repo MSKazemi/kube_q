@@ -193,6 +193,11 @@ def run_repl(
     quiet: bool = False,
     api_key: str | None = None,
     ca_cert: str | None = None,
+    query_timeout: float = 120.0,
+    health_timeout: float = 5.0,
+    namespace_timeout: float = 3.0,
+    startup_retry_timeout: int = 300,
+    startup_retry_interval: int = 5,
 ) -> None:
     state = SessionState(
         conversation_id=initial_conversation_id or str(uuid.uuid4()),
@@ -203,16 +208,14 @@ def run_repl(
     _pending_retry: str = ""  # pre-fills next prompt after a failed send
 
     if show_header and not quiet:
-        connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert)
+        connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout)
 
         if not connected:
-            _RETRY_TIMEOUT = 300
-            _RETRY_INTERVAL = 5
-            deadline = time.monotonic() + _RETRY_TIMEOUT
+            deadline = time.monotonic() + startup_retry_timeout
 
             console.print(f"[yellow]Cannot reach {url}/healthz[/yellow]")
             console.print(f"[dim]  Reason: {reason}[/dim]")
-            console.print(f"[dim]  Retrying every {_RETRY_INTERVAL}s for up to {_RETRY_TIMEOUT // 60} min…[/dim]\n")
+            console.print(f"[dim]  Retrying every {startup_retry_interval}s for up to {startup_retry_timeout // 60} min…[/dim]\n")
 
             attempt = 0
             try:
@@ -230,9 +233,9 @@ def run_repl(
                         refresh_per_second=4,
                         transient=True,
                     ):
-                        time.sleep(min(_RETRY_INTERVAL, max(0, remaining)))
+                        time.sleep(min(startup_retry_interval, max(0, remaining)))
 
-                    connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert)
+                    connected, reason = check_health(url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout)
             except KeyboardInterrupt:
                 console.print("\n[dim]Startup wait cancelled — continuing without API connection.[/dim]\n")
                 connected = False
@@ -343,7 +346,7 @@ def run_repl(
                     _ns_headers: dict[str, str] = {"X-User-ID": state.user_id}
                     if api_key:
                         _ns_headers["Authorization"] = f"Bearer {api_key}"
-                    with httpx.Client(timeout=3.0) as _hc:
+                    with httpx.Client(timeout=namespace_timeout) as _hc:
                         _r = _hc.get(f"{url}/v1/namespaces/{ns_arg}", headers=_ns_headers)
                     if _r.status_code not in (200, 204):
                         console.print(
@@ -400,13 +403,13 @@ def run_repl(
             response_text, state.hitl_pending, action_id = stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
                 pending_action_id=state.pending_action_id,
-                api_key=api_key, ca_cert=ca_cert,
+                api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
             )
         else:
             response_text, state.hitl_pending, action_id = non_stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
                 pending_action_id=state.pending_action_id,
-                api_key=api_key, ca_cert=ca_cert,
+                api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
             )
 
         if not response_text:

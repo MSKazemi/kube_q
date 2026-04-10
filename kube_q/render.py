@@ -161,8 +161,17 @@ def _fmt_help() -> None:
         "  [dim]kq --output plain[/dim]            Plain text output (no markdown)\n"
         "  [dim]kq --no-stream[/dim]               Wait for full response instead of streaming\n"
         "  [dim]kq --no-banner[/dim]               Suppress logo  [dim](useful for screen recordings)[/dim]\n"
+        "  [dim]kq --debug[/dim]                   Show raw HTTP request/response log\n"
+        "  [dim]kq --version[/dim]                 Print version and exit\n"
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
-        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable",
+        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable\n\n"
+
+        # ── Config file ───────────────────────────────────────────────────────
+        "[bold cyan]Config file[/bold cyan]  [dim](~/.kubeintellect/config.yaml)[/dim]\n\n"
+        "  [dim]url, timeout, health_timeout, namespace_timeout[/dim]\n"
+        "  [dim]startup_retry_timeout, startup_retry_interval[/dim]\n"
+        "  [dim]stream, output, log_level, api_key[/dim]\n\n"
+        "  Logs are written to [dim]~/.kubeintellect/kubeintellect.log[/dim]",
         title="[bold cyan]kube-q Help[/bold cyan]",
         border_style="cyan",
         expand=False,

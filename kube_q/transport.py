@@ -3,6 +3,7 @@ cli_transport.py — HTTP communication: SSE streaming, non-streaming query, hea
 """
 
 import json
+import logging
 import time
 
 import httpx
@@ -15,6 +16,18 @@ from kube_q.render import console, print_response, _plain_output
 
 # ── Retry config ───────────────────────────────────────────────────────────────
 _QUERY_RETRY_DELAYS = (2, 5, 10)  # seconds between attempts (3 total)
+
+# ── Module logger ──────────────────────────────────────────────────────────────
+_logger = logging.getLogger(__name__)
+
+# ── Debug mode (set by main via set_debug) ────────────────────────────────────
+_debug: bool = False
+
+
+def set_debug(enabled: bool) -> None:
+    """Enable/disable debug HTTP logging (raw request/response to stderr + log file)."""
+    global _debug
+    _debug = enabled
 
 
 # ── Error helpers ──────────────────────────────────────────────────────────────
@@ -38,10 +51,25 @@ def _describe_error(url: str, exc: Exception) -> str:
     return f"Unexpected error: {exc}"
 
 
+# ── Debug event hooks ─────────────────────────────────────────────────────────
+
+def _hook_request(request: httpx.Request) -> None:
+    safe_headers = {k: v for k, v in request.headers.items() if k.lower() != "authorization"}
+    body = request.content.decode("utf-8", errors="replace")
+    _logger.debug("→ %s %s  headers=%s", request.method, request.url, safe_headers)
+    if body:
+        _logger.debug("  body=%s", body[:4000])
+
+
+def _hook_response(response: httpx.Response) -> None:
+    _logger.debug("← %d %s", response.status_code, response.url)
+
+
 # ── Shared request builders ────────────────────────────────────────────────────
 
 def _make_client(ca_cert: str | None, timeout: float = 120.0) -> httpx.Client:
-    return httpx.Client(timeout=timeout, verify=ca_cert if ca_cert else True)
+    hooks: dict = {"request": [_hook_request], "response": [_hook_response]} if _debug else {}
+    return httpx.Client(timeout=timeout, verify=ca_cert if ca_cert else True, event_hooks=hooks)
 
 
 def _request_headers(
@@ -169,12 +197,14 @@ def stream_query(
     *,
     api_key: str | None = None,
     ca_cert: str | None = None,
+    timeout: float = 120.0,
 ) -> tuple[str, bool, str | None]:
     """Send a streaming chat request. Returns (full_text, hitl_pending, action_id)."""
     payload = _build_payload(messages, conversation_id, user_id, True, pending_action_id)
     headers = _request_headers(user_id, conversation_id, api_key, accept="text/event-stream")
+    _logger.info("stream_query conversation=%s user=%s url=%s", conversation_id, user_id, url)
 
-    with _make_client(ca_cert) as client:
+    with _make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
             if attempt > 0:
                 delay = _QUERY_RETRY_DELAYS[attempt - 1]
@@ -208,12 +238,14 @@ def non_stream_query(
     *,
     api_key: str | None = None,
     ca_cert: str | None = None,
+    timeout: float = 120.0,
 ) -> tuple[str, bool, str | None]:
     """Send a non-streaming chat request. Returns (response_text, hitl_pending, action_id)."""
     payload = _build_payload(messages, conversation_id, user_id, False, pending_action_id)
     headers = _request_headers(user_id, conversation_id, api_key)
+    _logger.info("non_stream_query conversation=%s user=%s url=%s", conversation_id, user_id, url)
 
-    with _make_client(ca_cert) as client:
+    with _make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
             if attempt > 0:
                 delay = _QUERY_RETRY_DELAYS[attempt - 1]
@@ -235,8 +267,10 @@ def non_stream_query(
 
                 try:
                     data = resp.json()
+                    _logger.debug("non_stream response body=%s", resp.text[:4000])
                 except json.JSONDecodeError as e:
                     console.print(f"[red]Invalid JSON from server: {e}[/red]")
+                    _logger.error("non_stream invalid JSON: %s — body=%s", e, resp.text[:500])
                     return "", False, None
 
                 try:
@@ -285,13 +319,15 @@ def check_health(
     *,
     api_key: str | None = None,
     ca_cert: str | None = None,
+    timeout: float = 5.0,
 ) -> tuple[bool, str]:
     """Check API reachability. Returns (ok, reason)."""
     headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    _logger.debug("check_health url=%s", url)
     try:
-        with _make_client(ca_cert, timeout=5.0) as client:
+        with _make_client(ca_cert, timeout=timeout) as client:
             r = client.get(f"{url}/healthz", headers=headers)
         if r.status_code == 200:
             return True, ""
