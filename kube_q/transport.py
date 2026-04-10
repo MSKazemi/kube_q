@@ -5,6 +5,7 @@ cli_transport.py — HTTP communication: SSE streaming, non-streaming query, hea
 import json
 import logging
 import time
+from typing import Any
 
 import httpx
 from rich.live import Live
@@ -111,7 +112,7 @@ def _build_payload(
 
 # ── SSE helpers ────────────────────────────────────────────────────────────────
 
-def _iter_sse(response: httpx.Response):
+def _iter_sse(response: httpx.Response) -> Any:
     """Yield parsed SSE data objects. Handles multi-line data and [DONE] sentinel."""
     buffer = ""
     for raw_chunk in response.iter_text():

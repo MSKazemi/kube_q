@@ -10,6 +10,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 from prompt_toolkit import PromptSession
@@ -45,11 +46,11 @@ def _make_prompt_session() -> PromptSession:
     kb = KeyBindings()
 
     @kb.add("enter")  # Enter → send
-    def _enter_sends(event):
+    def _enter_sends(event: Any) -> None:
         event.current_buffer.validate_and_handle()
 
     @kb.add("escape", "enter")  # Alt+Enter / Esc+Enter → newline
-    def _alt_enter_newline(event):
+    def _alt_enter_newline(event: Any) -> None:
         event.current_buffer.insert_text("\n")
 
     completer = WordCompleter(_SLASH_COMMANDS, sentence=True)

@@ -56,7 +56,7 @@ def load_config() -> Config:
         return Config()
 
     try:
-        import yaml  # pyyaml
+        import yaml  # type: ignore[import-untyped]  # pyyaml
     except ImportError:
         print(
             f"Warning: pyyaml is not installed — {CONFIG_FILE} will be ignored. "
