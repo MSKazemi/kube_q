@@ -1,0 +1,21 @@
+[project]
+name = "kube-q"
+version = "1.0.0"
+requires-python = ">=3.12"
+description = "Interactive terminal CLI for chatting with your Kubernetes cluster via an AI backend."
+dependencies = [
+    "httpx>=0.28",
+    "rich>=14.3.3",
+    "prompt_toolkit>=3.0",
+    "pygments>=2.18",
+]
+
+[project.scripts]
+kq = "kube_q.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kube_q"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
