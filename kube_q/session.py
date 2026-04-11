@@ -167,14 +167,19 @@ class SessionState:
 
 # ── Conversation persistence ──────────────────────────────────────────────────
 
-def _save_conversation(messages: list[dict], path: str | None) -> None:
+def _save_conversation(
+    messages: list[dict],
+    path: str | None,
+    user_name: str = "You",
+    agent_name: str = "kube-q",
+) -> None:
     """Write the conversation to a markdown file."""
     if not path:
         ts = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
         path = f"kube-q-{ts}.md"
     lines = [f"# kube-q Conversation\n\n*Saved: {datetime.datetime.now().isoformat()}*\n"]
     for msg in messages:
-        role = "**You**" if msg["role"] == "user" else "**kube-q**"
+        role = f"**{user_name}**" if msg["role"] == "user" else f"**{agent_name}**"
         lines.append(f"\n{role}:\n\n{msg['content']}\n\n---")
     with open(path, "w") as f:
         f.write("\n".join(lines))
@@ -198,6 +203,8 @@ def run_repl(
     namespace_timeout: float = 3.0,
     startup_retry_timeout: int = 300,
     startup_retry_interval: int = 5,
+    user_name: str = "You",
+    agent_name: str = "kube-q",
 ) -> None:
     state = SessionState(
         conversation_id=initial_conversation_id or str(uuid.uuid4()),
@@ -278,9 +285,9 @@ def run_repl(
         if state.hitl_pending:
             prompt = FormattedText([("bold fg:ansiyellow", "HITL> ")])
         elif state.current_namespace:
-            prompt = FormattedText([("bold fg:ansigreen", f"You [{state.current_namespace}]: ")])
+            prompt = FormattedText([("bold fg:ansigreen", f"{user_name} [{state.current_namespace}]: ")])
         else:
-            prompt = FormattedText([("bold fg:ansigreen", "You: ")])
+            prompt = FormattedText([("bold fg:ansigreen", f"{user_name}: ")])
 
         try:
             user_input = pt_session.prompt(prompt, default=_pending_retry).strip()
@@ -354,7 +361,7 @@ def run_repl(
                     "[dim yellow]Note: conversations may contain sensitive cluster data "
                     "— save to a secure location.[/dim yellow]"
                 )
-            _save_conversation(state.messages, save_path)
+            _save_conversation(state.messages, save_path, user_name=user_name, agent_name=agent_name)
             continue
 
         if user_input.lower().startswith("/ns"):

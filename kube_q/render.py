@@ -162,14 +162,19 @@ def _fmt_help() -> None:
         "  [dim]kq --no-banner[/dim]               Suppress logo  [dim](useful for screen recordings)[/dim]\n"  # noqa: E501
         "  [dim]kq --debug[/dim]                   Show raw HTTP request/response log\n"
         "  [dim]kq --version[/dim]                 Print version and exit\n"
+        "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
+        "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
-        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable\n\n"
+        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable\n"
+        "  [dim]KUBE_Q_USER_NAME=...[/dim]              Set your display name via environment variable\n"
+        "  [dim]KUBE_Q_AGENT_NAME=...[/dim]             Set assistant name via environment variable\n\n"
 
         # ── Config file ───────────────────────────────────────────────────────
         "[bold cyan]Config file[/bold cyan]  [dim](~/.kubeintellect/config.yaml)[/dim]\n\n"
         "  [dim]url, timeout, health_timeout, namespace_timeout[/dim]\n"
         "  [dim]startup_retry_timeout, startup_retry_interval[/dim]\n"
-        "  [dim]stream, output, log_level, api_key[/dim]\n\n"
+        "  [dim]stream, output, log_level, api_key[/dim]\n"
+        "  [dim]user_name, agent_name[/dim]\n\n"
         "  Logs are written to [dim]~/.kubeintellect/kubeintellect.log[/dim]",
         title="[bold cyan]kube-q Help[/bold cyan]",
         border_style="cyan",

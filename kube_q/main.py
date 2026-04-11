@@ -14,6 +14,8 @@ Usage:
   kq --output plain           # plain text output (no markdown)
   kq --debug                  # show raw HTTP requests/responses
   kq --version                # print version and exit
+  kq --user-name Alice        # your display name in the prompt (default: You)
+  kq --agent-name MyBot       # assistant name in saved conversations (default: kube-q)
 
 Environment variables:
   KUBE_Q_URL=http://...           # set API URL
@@ -29,6 +31,8 @@ Config file (~/.kubeintellect/config.yaml):
   stream: true
   log_level: INFO       # DEBUG | INFO | WARNING | ERROR
   output: rich          # rich | plain
+  user_name: You        # your display name in the prompt
+  agent_name: kube-q    # assistant name in saved conversations
 
 In-REPL commands:
   /new           — start a new conversation (new conversation ID)
@@ -174,6 +178,24 @@ def main() -> None:
         help="Output format: 'rich' (default, markdown rendering) or 'plain' (raw text)",
     )
     parser.add_argument(
+        "--user-name",
+        default=os.getenv("KUBE_Q_USER_NAME", cfg.user_name),
+        metavar="NAME",
+        help=(
+            "Display name for you in the prompt and saved conversations "
+            "(env: KUBE_Q_USER_NAME, config: user_name, default: You)"
+        ),
+    )
+    parser.add_argument(
+        "--agent-name",
+        default=os.getenv("KUBE_Q_AGENT_NAME", cfg.agent_name),
+        metavar="NAME",
+        help=(
+            "Display name for the assistant in saved conversations "
+            "(env: KUBE_Q_AGENT_NAME, config: agent_name, default: kube-q)"
+        ),
+    )
+    parser.add_argument(
         "--debug", "--verbose",
         dest="debug",
         action="store_true",
@@ -223,6 +245,8 @@ def main() -> None:
             namespace_timeout=cfg.namespace_timeout,
             startup_retry_timeout=cfg.startup_retry_timeout,
             startup_retry_interval=cfg.startup_retry_interval,
+            user_name=args.user_name,
+            agent_name=args.agent_name,
         )
 
 

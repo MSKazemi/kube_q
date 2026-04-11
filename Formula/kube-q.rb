@@ -3,8 +3,8 @@ class KubeQ < Formula
 
   desc "Interactive terminal CLI for chatting with your Kubernetes cluster via an AI backend"
   homepage "https://github.com/MSKazemi/kube_q"
-  url "https://files.pythonhosted.org/packages/source/k/kube-q/kube_q-VERSION.tar.gz"
-  # sha256 "<fill in after publishing to PyPI>"
+  url "https://files.pythonhosted.org/packages/source/k/kube-q/kube_q-1.0.0.tar.gz"
+  sha256 "0ecce3a15800343c3cbcd9490ce695e923b4390c0808629fcaec5ea03a9c967d"
   license "MIT"
 
   depends_on "python@3.12"

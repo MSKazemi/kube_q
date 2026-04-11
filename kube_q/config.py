@@ -37,6 +37,10 @@ class Config:
     output:    str  = "rich"      # "rich" | "plain"
     log_level: str  = "INFO"
 
+    # Display names
+    user_name:  str = "You"
+    agent_name: str = "kube-q"
+
 
 # ── YAML loading ──────────────────────────────────────────────────────────────
 
@@ -45,6 +49,7 @@ _KNOWN_KEYS: set[str] = {
     "timeout", "health_timeout", "namespace_timeout",
     "startup_retry_timeout", "startup_retry_interval",
     "stream", "output", "log_level",
+    "user_name", "agent_name",
 }
 
 
