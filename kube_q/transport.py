@@ -5,6 +5,7 @@ cli_transport.py — HTTP communication: SSE streaming, non-streaming query, hea
 import json
 import logging
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -77,13 +78,16 @@ def _make_client(ca_cert: str | None, timeout: float = 120.0) -> httpx.Client:
 
 
 def _request_headers(
-    user_id: str,
-    conversation_id: str,
     api_key: str | None,
+    session_id: str,
+    request_id: str,
     *,
     accept: str | None = None,
 ) -> dict[str, str]:
-    headers: dict[str, str] = {"X-User-ID": user_id, "X-Session-ID": conversation_id}
+    headers: dict[str, str] = {
+        "X-Session-ID": session_id,
+        "X-Request-ID": request_id,
+    }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if accept:
@@ -93,21 +97,15 @@ def _request_headers(
 
 def _build_payload(
     messages: list[dict],
-    conversation_id: str,
-    user_id: str,
+    user: str,
     stream: bool,
-    pending_action_id: str | None,
 ) -> dict:
-    payload: dict = {
-        "model": "gpt-3.5-turbo",
-        "messages": messages,
+    return {
+        "model": "kubeintellect-v2",
+        "messages": [messages[-1]],
         "stream": stream,
-        "conversation_id": conversation_id,
-        "user_id": user_id,
+        "user": user,
     }
-    if pending_action_id:
-        payload["action_id"] = pending_action_id
-    return payload
 
 
 # ── SSE helpers ────────────────────────────────────────────────────────────────
@@ -203,18 +201,20 @@ def _stream_once(
 def stream_query(
     url: str,
     messages: list[dict],
-    conversation_id: str,
-    user_id: str,
-    pending_action_id: str | None = None,
+    session_id: str,
+    user: str,
     *,
     api_key: str | None = None,
     ca_cert: str | None = None,
     timeout: float = 120.0,
+    request_id: str | None = None,
 ) -> tuple[str, bool, str | None]:
     """Send a streaming chat request. Returns (full_text, hitl_pending, action_id)."""
-    payload = _build_payload(messages, conversation_id, user_id, True, pending_action_id)
-    headers = _request_headers(user_id, conversation_id, api_key, accept="text/event-stream")
-    _logger.info("stream_query conversation=%s user=%s url=%s", conversation_id, user_id, url)
+    if request_id is None:
+        request_id = f"req-{uuid.uuid4()}"
+    _logger.info("stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
+    payload = _build_payload(messages, user, True)
+    headers = _request_headers(api_key, session_id, request_id, accept="text/event-stream")
 
     with _make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
@@ -244,18 +244,20 @@ def stream_query(
 def non_stream_query(
     url: str,
     messages: list[dict],
-    conversation_id: str,
-    user_id: str,
-    pending_action_id: str | None = None,
+    session_id: str,
+    user: str,
     *,
     api_key: str | None = None,
     ca_cert: str | None = None,
     timeout: float = 120.0,
+    request_id: str | None = None,
 ) -> tuple[str, bool, str | None]:
     """Send a non-streaming chat request. Returns (response_text, hitl_pending, action_id)."""
-    payload = _build_payload(messages, conversation_id, user_id, False, pending_action_id)
-    headers = _request_headers(user_id, conversation_id, api_key)
-    _logger.info("non_stream_query conversation=%s user=%s url=%s", conversation_id, user_id, url)
+    if request_id is None:
+        request_id = f"req-{uuid.uuid4()}"
+    _logger.info("non_stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
+    payload = _build_payload(messages, user, False)
+    headers = _request_headers(api_key, session_id, request_id)
 
     with _make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
