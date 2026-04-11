@@ -155,7 +155,7 @@ def _fmt_help() -> None:
         "[bold cyan]Useful launch flags[/bold cyan]\n\n"
         "  [dim]kq --query \"...\"[/dim]           One-shot query, then exit\n"
         "  [dim]kq --url http://host:8000[/dim]     Connect to a specific API server\n"
-        "  [dim]kq --api-key <key>[/dim]           Authenticate with an API key\n"
+        "  [dim]kq --api-key <key>[/dim]           Authenticate with an API key  [dim](required when server auth is enabled)[/dim]\n"  # noqa: E501
         "  [dim]kq --ca-cert /path/cert.pem[/dim]   Custom CA certificate for TLS\n"
         "  [dim]kq --output plain[/dim]            Plain text output (no markdown)\n"
         "  [dim]kq --no-stream[/dim]               Wait for full response instead of streaming\n"
@@ -165,17 +165,18 @@ def _fmt_help() -> None:
         "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
         "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
-        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable\n"
+        "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable  [dim](avoids 401 errors)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_USER_NAME=...[/dim]              Set your display name via environment variable\n"
         "  [dim]KUBE_Q_AGENT_NAME=...[/dim]             Set assistant name via environment variable\n\n"
 
         # ── Config file ───────────────────────────────────────────────────────
-        "[bold cyan]Config file[/bold cyan]  [dim](~/.kubeintellect/config.yaml)[/dim]\n\n"
-        "  [dim]url, timeout, health_timeout, namespace_timeout[/dim]\n"
-        "  [dim]startup_retry_timeout, startup_retry_interval[/dim]\n"
-        "  [dim]stream, output, log_level, api_key[/dim]\n"
-        "  [dim]user_name, agent_name[/dim]\n\n"
-        "  Logs are written to [dim]~/.kubeintellect/kubeintellect.log[/dim]",
+        "[bold cyan]Config (~/.kube-q/.env or ./.env)[/bold cyan]\n\n"
+        "  [dim]KUBE_Q_URL, KUBE_Q_API_KEY[/dim]\n"
+        "  [dim]KUBE_Q_TIMEOUT, KUBE_Q_HEALTH_TIMEOUT, KUBE_Q_NAMESPACE_TIMEOUT[/dim]\n"
+        "  [dim]KUBE_Q_STARTUP_RETRY_TIMEOUT, KUBE_Q_STARTUP_RETRY_INTERVAL[/dim]\n"
+        "  [dim]KUBE_Q_STREAM, KUBE_Q_OUTPUT, KUBE_Q_LOG_LEVEL[/dim]\n"
+        "  [dim]KUBE_Q_USER_NAME, KUBE_Q_AGENT_NAME[/dim]\n\n"
+        "  Logs are written to [dim]~/.kube-q/kube-q.log[/dim]",
         title="[bold cyan]kube-q Help[/bold cyan]",
         border_style="cyan",
         expand=False,

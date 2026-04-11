@@ -23,6 +23,7 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
+from kube_q.config import CONFIG_DIR
 from kube_q.render import _fmt_help, _print_logo, console
 from kube_q.transport import check_health, non_stream_query, stream_query
 
@@ -32,7 +33,7 @@ _SLASH_COMMANDS = [
     "/new", "/id", "/state", "/clear", "/save", "/approve", "/deny",
     "/help", "/ns", "/quit", "/exit", "/q",
 ]
-_HISTORY_FILE = os.path.expanduser("~/.kube_q_history")
+_HISTORY_FILE = str(CONFIG_DIR / "history")
 
 
 def _make_prompt_session() -> PromptSession:
@@ -130,11 +131,11 @@ def _resolve_attachments(text: str) -> tuple[str, list[str], list[str]]:
 
 # ── User-ID persistence ───────────────────────────────────────────────────────
 
-_USER_ID_FILE = os.path.expanduser("~/.kube_q_id")
+_USER_ID_FILE = str(CONFIG_DIR / "user-id")
 
 
 def _load_or_create_user_id(explicit: str | None = None) -> str:
-    """Return user_id: --user-id arg > persisted ~/.kube_q_id > generate+save new."""
+    """Return user_id: --user-id arg > persisted ~/.kube-q/user-id > generate+save new."""
     if explicit:
         with open(_USER_ID_FILE, "w") as f:
             f.write(explicit)
@@ -329,7 +330,7 @@ def run_repl(
             ns_line = (
                 f"  [dim]Namespace    [/dim] {ns}"
                 if ns
-                else "  [dim]Namespace    [/dim] [dim italic](none)[/dim]"
+                else "  [dim]Namespace    [/dim] [dim italic](none)[/dim italic]"
             )
             hitl_line = (
                 f"  [dim]HITL pending [/dim] [bold yellow]yes — action_id={state.pending_action_id}[/bold yellow]"  # noqa: E501

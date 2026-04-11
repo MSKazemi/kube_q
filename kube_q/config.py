@@ -1,28 +1,30 @@
 """
-config.py — Config file loading (~/.kubeintellect/config.yaml) and logging setup.
+config.py — Configuration loading and logging setup.
+
+Priority order (highest wins):
+  CLI flag  >  shell env var  >  ./.env  >  ~/.kube-q/.env  >  hardcoded default
 """
 
 import logging
 import logging.handlers
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-CONFIG_DIR  = Path.home() / ".kubeintellect"
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
-LOG_FILE    = CONFIG_DIR / "kubeintellect.log"
+CONFIG_DIR = Path.home() / ".kube-q"
+LOG_FILE   = CONFIG_DIR / "kube-q.log"
 
 
 # ── Config dataclass ──────────────────────────────────────────────────────────
 
 @dataclass
 class Config:
-    """All runtime configuration.  CLI args override config file which overrides defaults."""
+    """All runtime configuration. CLI args override env vars which override defaults."""
     # Connection
-    url:                    str   = "http://localhost:8000"
+    url:                    str        = "http://localhost:8000"
     api_key:                str | None = None
 
     # Timeouts (seconds)
@@ -34,7 +36,7 @@ class Config:
 
     # Behaviour
     stream:    bool = True
-    output:    str  = "rich"      # "rich" | "plain"
+    output:    str  = "rich"   # "rich" | "plain"
     log_level: str  = "INFO"
 
     # Display names
@@ -42,53 +44,82 @@ class Config:
     agent_name: str = "kube-q"
 
 
-# ── YAML loading ──────────────────────────────────────────────────────────────
+# ── .env file support ─────────────────────────────────────────────────────────
 
-_KNOWN_KEYS: set[str] = {
-    "url", "api_key",
-    "timeout", "health_timeout", "namespace_timeout",
-    "startup_retry_timeout", "startup_retry_interval",
-    "stream", "output", "log_level",
-    "user_name", "agent_name",
+# Maps KUBE_Q_* env var names → (config field, type).
+_ENV_MAP: dict[str, tuple[str, type]] = {
+    "KUBE_Q_URL":                    ("url",                    str),
+    "KUBE_Q_API_KEY":                ("api_key",                str),
+    "KUBE_Q_TIMEOUT":                ("timeout",                float),
+    "KUBE_Q_HEALTH_TIMEOUT":         ("health_timeout",         float),
+    "KUBE_Q_NAMESPACE_TIMEOUT":      ("namespace_timeout",      float),
+    "KUBE_Q_STARTUP_RETRY_TIMEOUT":  ("startup_retry_timeout",  int),
+    "KUBE_Q_STARTUP_RETRY_INTERVAL": ("startup_retry_interval", int),
+    "KUBE_Q_STREAM":                 ("stream",                 bool),
+    "KUBE_Q_OUTPUT":                 ("output",                 str),
+    "KUBE_Q_LOG_LEVEL":              ("log_level",              str),
+    "KUBE_Q_USER_NAME":              ("user_name",              str),
+    "KUBE_Q_AGENT_NAME":             ("agent_name",             str),
 }
 
 
+def _load_dotenv_file(path: Path) -> None:
+    """Minimal .env parser — sets env vars not already in the environment.
+
+    Supports KEY=VALUE, KEY="VALUE", KEY='VALUE', and inline # comments.
+    Shell-set variables always win (no override).
+    """
+    if not path.exists():
+        return
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.split("#")[0].strip().strip("\"'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        pass
+
+
+def _apply_env(cfg: Config) -> None:
+    """Override cfg fields from environment variables."""
+    for env_key, (field, typ) in _ENV_MAP.items():
+        val = os.environ.get(env_key)
+        if val is None:
+            continue
+        if typ is bool:
+            setattr(cfg, field, val.lower() not in ("0", "false", "no", "off"))
+        else:
+            try:
+                setattr(cfg, field, typ(val))
+            except (ValueError, TypeError):
+                print(
+                    f"Warning: invalid value for {env_key}={val!r} "
+                    f"(expected {typ.__name__}) — ignored",
+                    file=sys.stderr,
+                )
+
+
 def load_config() -> Config:
-    """Load ~/.kubeintellect/config.yaml; return defaults if absent or unreadable."""
+    """Load configuration from .env files and environment variables.
+
+    .env files loaded (lower to higher priority):
+      ~/.kube-q/.env    — persistent user-level defaults
+      ./.env            — project-local or per-cluster overrides
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not CONFIG_FILE.exists():
-        return Config()
-
-    try:
-        import yaml  # type: ignore[import-untyped]  # pyyaml
-    except ImportError:
-        print(
-            f"Warning: pyyaml is not installed — {CONFIG_FILE} will be ignored. "
-            "Run: pip install pyyaml",
-            file=sys.stderr,
-        )
-        return Config()
-
-    try:
-        raw: dict[str, Any] = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
-    except Exception as exc:
-        print(f"Warning: could not parse {CONFIG_FILE}: {exc}", file=sys.stderr)
-        return Config()
+    # Load .env files before reading env vars.
+    # Shell-exported variables are never overwritten.
+    _load_dotenv_file(CONFIG_DIR / ".env")  # user-level  (lower priority)
+    _load_dotenv_file(Path(".env"))          # local        (higher priority)
 
     cfg = Config()
-    unknown = []
-    for key, value in raw.items():
-        if key in _KNOWN_KEYS:
-            setattr(cfg, key, value)
-        else:
-            unknown.append(key)
-
-    if unknown:
-        print(
-            f"Warning: unknown key(s) in {CONFIG_FILE}: {', '.join(unknown)}",
-            file=sys.stderr,
-        )
+    _apply_env(cfg)
     return cfg
 
 
@@ -97,7 +128,7 @@ def load_config() -> Config:
 def setup_logging(log_level: str = "INFO", debug: bool = False) -> None:
     """Configure the kube_q logger.
 
-    Always writes to ~/.kubeintellect/kubeintellect.log (rotating, 5 MB × 3).
+    Always writes to ~/.kube-q/kube-q.log (rotating, 5 MB × 3).
     When *debug* is True the level is forced to DEBUG and a second handler
     writes brief lines to stderr so the user sees live HTTP chatter.
     """

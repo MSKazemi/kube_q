@@ -19,20 +19,17 @@ Usage:
 
 Environment variables:
   KUBE_Q_URL=http://...           # set API URL
-  KUBE_Q_API_KEY=...             # set API key
+  KUBE_Q_API_KEY=...             # set API key (required when server auth is enabled)
 
-Config file (~/.kubeintellect/config.yaml):
-  url: http://localhost:8000
-  timeout: 120          # query timeout in seconds
-  health_timeout: 5
-  namespace_timeout: 3
-  startup_retry_timeout: 300
-  startup_retry_interval: 5
-  stream: true
-  log_level: INFO       # DEBUG | INFO | WARNING | ERROR
-  output: rich          # rich | plain
-  user_name: You        # your display name in the prompt
-  agent_name: kube-q    # assistant name in saved conversations
+Config (~/.kube-q/.env or ./.env):
+  KUBE_Q_URL=http://localhost:8000
+  KUBE_Q_API_KEY=                  # required only when server auth is enabled
+  KUBE_Q_TIMEOUT=120
+  KUBE_Q_STREAM=true
+  KUBE_Q_OUTPUT=rich               # rich | plain
+  KUBE_Q_LOG_LEVEL=INFO            # DEBUG | INFO | WARNING | ERROR
+  KUBE_Q_USER_NAME=You
+  KUBE_Q_AGENT_NAME=kube-q
 
 In-REPL commands:
   /new           — start a new conversation (new conversation ID)
@@ -61,7 +58,6 @@ Attaching files:
 """
 
 import argparse
-import os
 import uuid
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
@@ -121,7 +117,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--url",
-        default=os.getenv("KUBE_Q_URL", cfg.url),
+        default=cfg.url,
         help=(
             "kube-q API base URL "
             "(env: KUBE_Q_URL, config: url, default: http://localhost:8000)"
@@ -148,8 +144,8 @@ def main() -> None:
         default=None,
         metavar="ID",
         help=(
-            "User ID to send with requests (persisted to ~/.kube_q_id). "
-            "Reads from ~/.kube_q_id if not supplied."
+            "User ID to send with requests (persisted to ~/.kube-q/user-id). "
+            "Reads from ~/.kube-q/user-id if not supplied."
         ),
     )
     parser.add_argument(
@@ -161,7 +157,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--api-key",
-        default=os.getenv("KUBE_Q_API_KEY", cfg.api_key),
+        default=cfg.api_key,
         metavar="KEY",
         help="API key for authentication (env: KUBE_Q_API_KEY, config: api_key)",
     )
@@ -179,7 +175,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--user-name",
-        default=os.getenv("KUBE_Q_USER_NAME", cfg.user_name),
+        default=cfg.user_name,
         metavar="NAME",
         help=(
             "Display name for you in the prompt and saved conversations "
@@ -188,7 +184,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--agent-name",
-        default=os.getenv("KUBE_Q_AGENT_NAME", cfg.agent_name),
+        default=cfg.agent_name,
         metavar="NAME",
         help=(
             "Display name for the assistant in saved conversations "
@@ -202,7 +198,7 @@ def main() -> None:
         default=False,
         help=(
             "Enable debug mode: log raw HTTP requests/responses to stderr "
-            "and ~/.kubeintellect/kubeintellect.log"
+            "and ~/.kube-q/kube-q.log"
         ),
     )
 

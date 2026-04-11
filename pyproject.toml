@@ -27,7 +27,6 @@ dependencies = [
     "rich>=14.3.3",
     "prompt_toolkit>=3.0",
     "pygments>=2.18",
-    "pyyaml>=6.0",
 ]
 
 [project.urls]

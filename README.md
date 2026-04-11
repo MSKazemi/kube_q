@@ -59,7 +59,7 @@ kq --query "list failing deployments" --output plain
 ## In-REPL commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `/new` | Start a new conversation |
 | `/id` | Show current conversation ID |
 | `/state` | Show full session state |
@@ -74,7 +74,7 @@ kq --query "list failing deployments" --output plain
 **Keyboard shortcuts:**
 
 | Key | Action |
-|---|---|
+| --- | --- |
 | `Enter` | Send message |
 | `Alt+Enter` or `Esc` → `Enter` | Insert newline (multi-line input) |
 | `Tab` | Auto-complete slash commands |
@@ -85,7 +85,7 @@ kq --query "list failing deployments" --output plain
 
 Embed a file's contents directly in your message using `@`:
 
-```
+```text
 what is wrong with this deployment? @deployment.yaml
 compare these two configs: @old.yaml @new.yaml
 ```
@@ -96,22 +96,110 @@ Supports: `yaml`, `json`, `py`, `sh`, `go`, `tf`, `toml`, `js`, `ts`, `rs`, `jav
 
 ## CLI options
 
-```
+```text
 kq [--url URL] [--query TEXT] [--no-stream] [--user-id ID]
    [--api-key KEY] [--ca-cert PATH] [--output {rich,plain}]
-   [--no-banner]
+   [--no-banner] [--user-name NAME] [--agent-name NAME]
 ```
 
 | Flag | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--url` | `http://localhost:8000` | kube-q API base URL (env: `KUBE_Q_URL`) |
 | `--query` / `-q` | — | Run a single query and exit |
 | `--no-stream` | off | Wait for full response instead of streaming |
 | `--user-id` | auto | Persistent user ID (saved to `~/.kube_q_id`) |
-| `--api-key` | — | Bearer token (env: `KUBE_Q_API_KEY`) |
+| `--api-key` | — | Bearer token for auth-enabled servers (env: `KUBE_Q_API_KEY`) |
 | `--ca-cert` | — | Custom CA certificate bundle for TLS |
 | `--output` | `rich` | `rich` for markdown rendering, `plain` for raw text |
 | `--no-banner` | off | Suppress logo (useful for screen recordings) |
+| `--user-name` | `You` | Your display name in the prompt (env: `KUBE_Q_USER_NAME`) |
+| `--agent-name` | `kube-q` | Assistant name in saved conversations (env: `KUBE_Q_AGENT_NAME`) |
+
+---
+
+## Configuration
+
+kube-q loads configuration from `.env` files and environment variables. There is no separate config file — everything is done with `KUBE_Q_*` variables.
+
+Priority order (highest wins):
+
+```text
+CLI flag  >  shell env var  >  ./.env  >  ~/.kube-q/.env  >  default
+```
+
+### .env files
+
+kube-q automatically loads `.env` files — no extra tooling required:
+
+| Location | Priority | Use case |
+| --- | --- | --- |
+| `~/.kube-q/.env` | lower | Persistent user-level defaults |
+| `./.env` (current directory) | higher | Project-local or per-cluster overrides |
+
+Shell-exported variables always win over `.env` files.
+
+**Supported variables:**
+
+```bash
+KUBE_Q_URL=http://localhost:8000
+KUBE_Q_API_KEY=your-key-here
+KUBE_Q_TIMEOUT=120
+KUBE_Q_HEALTH_TIMEOUT=5
+KUBE_Q_NAMESPACE_TIMEOUT=3
+KUBE_Q_STARTUP_RETRY_TIMEOUT=300
+KUBE_Q_STARTUP_RETRY_INTERVAL=5
+KUBE_Q_STREAM=true
+KUBE_Q_OUTPUT=rich
+KUBE_Q_LOG_LEVEL=INFO
+KUBE_Q_USER_NAME=You
+KUBE_Q_AGENT_NAME=kube-q
+```
+
+**Example — per-cluster `.env`:**
+
+```bash
+# .env in your cluster's working directory
+KUBE_Q_URL=https://kube-q.prod.example.com
+KUBE_Q_API_KEY=prod-secret-key
+KUBE_Q_USER_NAME=alice
+```
+
+Then just run `kq` from that directory and it picks up the settings automatically.
+
+### Best practice by install method
+
+| Method | Recommended approach |
+| --- | --- |
+| `pip install kube-q` (end user) | Put settings in `~/.kube-q/.env` — loaded on every `kq` run, nothing to manage per-directory |
+| Cloning from source (developer) | Copy `.env.example` → `.env` in the repo root, fill in dev values — already git-ignored |
+| Multiple clusters / environments | One `.env` per working directory; `cd` into the right directory before running `kq` |
+| CI / scripts | Use shell env vars (`export KUBE_Q_*`) or inject secrets directly — avoid `.env` files in automated environments |
+
+For pip users the simplest setup is:
+
+```bash
+# One-time setup
+mkdir -p ~/.kube-q
+cat >> ~/.kube-q/.env <<'EOF'
+KUBE_Q_URL=https://kube-q.example.com
+KUBE_Q_API_KEY=your-key-here
+EOF
+```
+
+After that, just run `kq` from any directory.
+
+---
+
+## Authentication
+
+When the server has API key authentication enabled, requests without a valid key are rejected with HTTP 401. `kube-q` shows a clear message in that case:
+
+```text
+Authentication required. Set KUBE_Q_API_KEY or pass --api-key with a valid key.
+Ask your admin for an API key.
+```
+
+Supply the key via CLI flag, env var, `.env` file, or config file (see [Configuration](#configuration) above). When auth is **disabled** on the server, no key is needed and everything works as before.
 
 ---
 
@@ -119,7 +207,7 @@ kq [--url URL] [--query TEXT] [--no-stream] [--user-id ID]
 
 When the AI backend requests approval before executing a potentially destructive action, `kube-q` pauses and shows an approval prompt:
 
-```
+```text
 ╭─ Action requires approval ─╮
 │ Type /approve to proceed   │
 │ or /deny to cancel.        │

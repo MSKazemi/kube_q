@@ -150,6 +150,14 @@ def _stream_once(
     ) as live:
         with client.stream("POST", f"{url}/v1/chat/completions",
                            json=payload, headers=headers) as resp:
+            if resp.status_code == 401:
+                live.stop()
+                console.print(
+                    "[red]Authentication required.[/red] "
+                    "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
+                    "[dim]Ask your system administrator for an API key.[/dim]"
+                )
+                return "", False, None
             if resp.status_code != 200:
                 body = resp.read().decode()
                 live.stop()
@@ -265,6 +273,13 @@ def non_stream_query(
                 )
                 elapsed = time.monotonic() - t0
 
+                if resp.status_code == 401:
+                    console.print(
+                        "[red]Authentication required.[/red] "
+                        "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
+                        "[dim]Ask your system administrator for an API key.[/dim]"
+                    )
+                    return "", False, None
                 if resp.status_code != 200:
                     console.print(f"[red][HTTP {resp.status_code}] {resp.text}[/red]")
                     return "", False, None
@@ -335,6 +350,8 @@ def check_health(
             r = client.get(f"{url}/healthz", headers=headers)
         if r.status_code == 200:
             return True, ""
+        if r.status_code == 401:
+            return False, "Authentication required — set KUBE_Q_API_KEY or pass --api-key"
         return False, f"HTTP {r.status_code} from {url}/healthz"
     except httpx.ConnectError as e:
         msg = str(e)
