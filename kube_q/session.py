@@ -433,13 +433,11 @@ def run_repl(
         if stream:
             response_text, state.hitl_pending, action_id = stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
-                pending_action_id=state.pending_action_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
             )
         else:
             response_text, state.hitl_pending, action_id = non_stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
-                pending_action_id=state.pending_action_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
             )
 

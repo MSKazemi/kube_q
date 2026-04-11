@@ -19,6 +19,7 @@ from kube_q.transport import (
     _request_headers,
     check_health,
     non_stream_query,
+    stream_query,
 )
 
 # ── _describe_error ────────────────────────────────────────────────────────────
@@ -58,41 +59,64 @@ def test_describe_error_unknown() -> None:
 # ── _build_payload ─────────────────────────────────────────────────────────────
 
 
-def test_build_payload_no_action_id() -> None:
+def test_build_payload_last_message_only() -> None:
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+        {"role": "user", "content": "third"},
+    ]
+    payload = _build_payload(messages, "user-1", True)
+    assert len(payload["messages"]) == 1
+    assert payload["messages"][0]["content"] == "third"
+
+
+def test_build_payload_single_message() -> None:
     messages = [{"role": "user", "content": "hello"}]
-    payload = _build_payload(messages, "conv-1", "user-1", True, None)
-    assert payload["messages"] is messages
+    payload = _build_payload(messages, "user-1", True)
+    assert len(payload["messages"]) == 1
     assert payload["stream"] is True
-    assert payload["conversation_id"] == "conv-1"
-    assert payload["user_id"] == "user-1"
+    assert payload["user"] == "user-1"
+    assert payload["model"] == "kubeintellect-v2"
+
+
+def test_build_payload_no_conversation_id() -> None:
+    payload = _build_payload([{"role": "user", "content": "hi"}], "user-1", False)
+    assert "conversation_id" not in payload
+    assert "user_id" not in payload
     assert "action_id" not in payload
 
 
-def test_build_payload_with_action_id() -> None:
-    payload = _build_payload([], "conv-1", "user-1", False, "act-42")
+def test_build_payload_user_field() -> None:
+    payload = _build_payload([{"role": "user", "content": "hi"}], "cli-user-abc", False)
+    assert payload["user"] == "cli-user-abc"
     assert payload["stream"] is False
-    assert payload["action_id"] == "act-42"
 
 
 # ── _request_headers ──────────────────────────────────────────────────────────
 
 
 def test_request_headers_minimal() -> None:
-    h = _request_headers("u1", "c1", None)
-    assert h["X-User-ID"] == "u1"
-    assert h["X-Session-ID"] == "c1"
+    h = _request_headers(None, "sess-1", "req-abc")
+    assert h["X-Session-ID"] == "sess-1"
+    assert h["X-Request-ID"] == "req-abc"
+    assert "X-User-ID" not in h
     assert "Authorization" not in h
     assert "Accept" not in h
 
 
 def test_request_headers_with_api_key() -> None:
-    h = _request_headers("u1", "c1", "secret-key")
+    h = _request_headers("secret-key", "sess-1", "req-abc")
     assert h["Authorization"] == "Bearer secret-key"
 
 
 def test_request_headers_with_accept() -> None:
-    h = _request_headers("u1", "c1", None, accept="text/event-stream")
+    h = _request_headers(None, "sess-1", "req-abc", accept="text/event-stream")
     assert h["Accept"] == "text/event-stream"
+
+
+def test_request_headers_no_user_id() -> None:
+    h = _request_headers("key", "sess-1", "req-abc")
+    assert "X-User-ID" not in h
 
 
 # ── _iter_sse ─────────────────────────────────────────────────────────────────
@@ -198,8 +222,8 @@ def test_check_health_timeout() -> None:
 # ── non_stream_query ──────────────────────────────────────────────────────────
 
 _MESSAGES = [{"role": "user", "content": "list pods"}]
-_CONV_ID = "conv-abc"
-_USER_ID = "user-xyz"
+_SESSION_ID = "sess-abc"
+_USER = "user-xyz"
 
 
 def _ok_body(text: str, hitl: bool = False, action_id: str | None = None) -> dict:
@@ -215,7 +239,7 @@ def test_non_stream_query_success() -> None:
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_ok_body("pod list here"))
     )
-    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == "pod list here"
     assert hitl is False
     assert action_id is None
@@ -226,7 +250,7 @@ def test_non_stream_query_http_error() -> None:
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(500, text="Internal Server Error")
     )
-    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == ""
     assert hitl is False
 
@@ -236,7 +260,7 @@ def test_non_stream_query_invalid_json() -> None:
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, content=b"not-json")
     )
-    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == ""
 
 
@@ -245,7 +269,7 @@ def test_non_stream_query_missing_keys() -> None:
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json={"choices": []})  # empty choices
     )
-    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == ""
 
 
@@ -256,7 +280,7 @@ def test_non_stream_query_hitl_flag() -> None:
             200, json=_ok_body("action pending", hitl=True, action_id="act-7")
         )
     )
-    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, action_id = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == "action pending"
     assert hitl is True
     assert action_id == "act-7"
@@ -267,7 +291,7 @@ def test_non_stream_query_hitl_emoji_fallback() -> None:
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, json=_ok_body("needs approval 🛑"))
     )
-    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+    text, hitl, _ = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert hitl is True
 
 
@@ -281,7 +305,7 @@ def test_non_stream_query_retry_then_succeed() -> None:
         ]
     )
     with patch("kube_q.transport.time.sleep"):  # don't actually sleep
-        text, hitl, _ = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+        text, hitl, _ = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == "ok on retry"
 
 
@@ -292,5 +316,53 @@ def test_non_stream_query_all_retries_fail() -> None:
         side_effect=httpx.ConnectError("refused")
     )
     with patch("kube_q.transport.time.sleep"):
-        text, hitl, _ = non_stream_query(BASE, _MESSAGES, _CONV_ID, _USER_ID)
+        text, hitl, _ = non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert text == ""
+
+
+@respx.mock
+def test_non_stream_query_sends_session_and_request_id() -> None:
+    """v2: X-Session-ID and X-Request-ID must be present; X-User-ID must be absent."""
+    route = respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_ok_body("ok"))
+    )
+    non_stream_query(BASE, _MESSAGES, _SESSION_ID, _USER, request_id="req-fixed")
+    req_headers = route.calls[0].request.headers
+    assert req_headers["X-Session-ID"] == _SESSION_ID
+    assert req_headers["X-Request-ID"] == "req-fixed"
+    assert "x-user-id" not in req_headers
+
+
+@respx.mock
+def test_non_stream_query_payload_v2() -> None:
+    """v2: payload must have 'user', no 'user_id'/'conversation_id', only last message."""
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "user", "content": "last"},
+    ]
+    route = respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_ok_body("ok"))
+    )
+    non_stream_query(BASE, messages, _SESSION_ID, _USER)
+    body = json.loads(route.calls[0].request.content)
+    assert body["user"] == _USER
+    assert "user_id" not in body
+    assert "conversation_id" not in body
+    assert len(body["messages"]) == 1
+    assert body["messages"][0]["content"] == "last"
+
+
+# ── request_id auto-generation ────────────────────────────────────────────────
+
+
+@respx.mock
+def test_request_id_auto_generated() -> None:
+    """stream_query without request_id must send a 'req-' prefixed X-Request-ID."""
+    route = respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=b"data: [DONE]\n\n",
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):  # suppress Rich output in tests
+        stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    req_headers = route.calls[0].request.headers
+    assert req_headers["X-Request-ID"].startswith("req-")
