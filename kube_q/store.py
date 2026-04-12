@@ -65,7 +65,7 @@ _fts_available: bool = True
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()  # noqa: UP017
 
 
 def _migrate_to_v2(conn: sqlite3.Connection) -> None:
@@ -508,7 +508,6 @@ def list_branches(session_id: str) -> list[dict]:
 
         # Collect: direct children + siblings (other children of same parent)
         if parent_id:
-            candidates = (session_id, parent_id)
             rows = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.updated_at, s.namespace,

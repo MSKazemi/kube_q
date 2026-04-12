@@ -23,10 +23,10 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
+from kube_q import costs, store
 from kube_q.config import CONFIG_DIR
 from kube_q.render import _fmt_help, _print_logo, console, format_branches, format_search_results
 from kube_q.transport import check_health, non_stream_query, stream_query
-from kube_q import costs, store
 
 # ── Prompt session config ─────────────────────────────────────────────────────
 
@@ -387,7 +387,10 @@ def run_repl(
         if state.hitl_pending:
             prompt = FormattedText([("bold fg:ansiyellow", "HITL> ")])
         elif state.current_namespace:
-            prompt = FormattedText([("bold fg:ansigreen", f"{user_name} [{state.current_namespace}]: ")])
+            ns = state.current_namespace
+            prompt = FormattedText(
+                [("bold fg:ansigreen", f"{user_name} [{ns}]: ")]
+            )
         else:
             prompt = FormattedText([("bold fg:ansigreen", f"{user_name}: ")])
 
@@ -476,7 +479,9 @@ def run_repl(
                     "[dim yellow]Note: conversations may contain sensitive cluster data "
                     "— save to a secure location.[/dim yellow]"
                 )
-            _save_conversation(state.messages, save_path, user_name=user_name, agent_name=agent_name)
+            _save_conversation(
+                state.messages, save_path, user_name=user_name, agent_name=agent_name
+            )
             continue
 
         if user_input.lower().startswith("/ns"):
