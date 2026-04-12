@@ -16,6 +16,8 @@ from kube_q.transport import (
     _build_payload,
     _describe_error,
     _iter_sse,
+    _render_error_event,
+    _render_tool_call,
     _request_headers,
     check_health,
     non_stream_query,
@@ -484,3 +486,153 @@ def test_stream_query_usage_in_same_event_as_choices() -> None:
         text, hitl, action_id, returned_usage = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
     assert returned_usage is not None
     assert returned_usage["total_tokens"] == 30
+
+
+# ── Side-channel event routing ────────────────────────────────────────────────
+
+
+@respx.mock
+def test_stream_query_status_events_do_not_add_to_text() -> None:
+    """status events are display-only; they must not contribute to full_text."""
+    events = [
+        {"type": "status", "phase": "analyzing", "message": "Analyzing cluster…"},
+        {"type": "status", "message": "Fetching pods…"},
+        {"choices": [{"delta": {"content": "result"}, "finish_reason": "stop"}]},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "result"
+
+
+@respx.mock
+def test_stream_query_tool_call_events_do_not_add_to_text() -> None:
+    """tool_call events are display-only; they must not contribute to full_text."""
+    events = [
+        {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching pods"},
+        {"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "done"
+
+
+@respx.mock
+def test_stream_query_error_events_do_not_add_to_text() -> None:
+    """error events are display-only; they must not contribute to full_text."""
+    events = [
+        {"type": "error", "message": "Failed to fetch logs"},
+        {"choices": [{"delta": {"content": "partial"}, "finish_reason": "stop"}]},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "partial"
+
+
+@respx.mock
+def test_stream_query_token_type_events_accumulate_text() -> None:
+    """Custom type=token events are treated as streaming tokens."""
+    events = [
+        {"type": "token", "content": "The "},
+        {"type": "token", "content": "issue "},
+        {"type": "token", "content": "is clear."},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "The issue is clear."
+
+
+@respx.mock
+def test_stream_query_final_type_event_accumulates_text() -> None:
+    """Custom type=final event is treated as the final content chunk."""
+    events = [
+        {"type": "final", "content": "Root cause: missing env var"},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "Root cause: missing env var"
+
+
+@respx.mock
+def test_stream_query_mixed_custom_and_openai_events() -> None:
+    """Mixed stream: status/tool_call before tokens, then standard OpenAI delta."""
+    events = [
+        {"type": "status", "message": "Scanning…"},
+        {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching"},
+        {"choices": [{"delta": {"content": "All "}}]},
+        {"choices": [{"delta": {"content": "pods "}}]},
+        {"choices": [{"delta": {"content": "healthy"}, "finish_reason": "stop"}]},
+    ]
+    respx.post(f"{BASE}/v1/chat/completions").mock(
+        return_value=httpx.Response(200, content=_sse_body(*events),
+                                    headers={"Content-Type": "text/event-stream"})
+    )
+    with patch("kube_q.transport.Live"):
+        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "All pods healthy"
+    assert hitl is False
+
+
+# ── _render_tool_call / _render_error_event unit tests ────────────────────────
+
+
+def test_render_tool_call_tool_and_message() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_tool_call({"tool": "k8s.get_pods", "message": "Fetching pods"})
+    mock_console.print.assert_called_once()
+    call_arg = mock_console.print.call_args[0][0]
+    assert "k8s.get_pods" in call_arg
+    assert "Fetching pods" in call_arg
+
+
+def test_render_tool_call_tool_only() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_tool_call({"tool": "k8s.describe_node"})
+    mock_console.print.assert_called_once()
+    assert "k8s.describe_node" in mock_console.print.call_args[0][0]
+
+
+def test_render_tool_call_message_only() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_tool_call({"message": "doing something"})
+    mock_console.print.assert_called_once()
+    assert "doing something" in mock_console.print.call_args[0][0]
+
+
+def test_render_tool_call_empty_is_silent() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_tool_call({})
+    mock_console.print.assert_not_called()
+
+
+def test_render_error_event_prints_message() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_error_event({"message": "something broke"})
+    mock_console.print.assert_called_once()
+    assert "something broke" in mock_console.print.call_args[0][0]
+
+
+def test_render_error_event_fallback_to_str() -> None:
+    with patch("kube_q.transport.console") as mock_console:
+        _render_error_event({"code": 500})  # no "message" key
+    mock_console.print.assert_called_once()
+    assert "500" in mock_console.print.call_args[0][0]
