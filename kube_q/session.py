@@ -487,22 +487,29 @@ def run_repl(
                 _prepend_ns_once = False
                 console.print("[dim]Namespace cleared.[/dim]")
             else:
+                # Validate against the cluster namespace list from the backend.
+                _ns_valid: bool | None = None
                 try:
                     _ns_headers: dict[str, str] = {"X-User-ID": state.user_id}
                     if api_key:
                         _ns_headers["Authorization"] = f"Bearer {api_key}"
                     with httpx.Client(timeout=namespace_timeout) as _hc:
-                        _r = _hc.get(f"{url}/v1/namespaces/{ns_arg}", headers=_ns_headers)
-                    if _r.status_code not in (200, 204):
-                        console.print(
-                            f"[yellow]Warning: namespace '{ns_arg}' not found"
-                            " — set anyway?[/yellow] (namespace set regardless)"
-                        )
+                        _r = _hc.get(f"{url}/v1/namespaces", headers=_ns_headers)
+                    if _r.status_code == 200:
+                        _known = _r.json().get("namespaces", [])
+                        _ns_valid = ns_arg in _known
                 except Exception:
-                    pass
-                state.current_namespace = ns_arg
-                _prepend_ns_once = True
-                console.print(f"[dim]Active namespace set to[/dim] [bold]{ns_arg}[/bold]")
+                    pass  # backend unreachable — allow the set without validation
+
+                if _ns_valid is False:
+                    console.print(
+                        f"[red]Namespace '{ns_arg}' not found in the cluster.[/red] "
+                        "Use [bold]list all ns[/bold] to see available namespaces."
+                    )
+                else:
+                    state.current_namespace = ns_arg
+                    _prepend_ns_once = True
+                    console.print(f"[dim]Active namespace set to[/dim] [bold]{ns_arg}[/bold]")
             continue
 
         if user_input.lower() == "/sessions":
