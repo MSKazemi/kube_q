@@ -114,6 +114,42 @@ def _build_payload(
     return payload
 
 
+# ── Side-channel event renderers ──────────────────────────────────────────────
+
+def _render_status(event: dict, live: Live, first_token: bool) -> None:
+    """Render a ``status`` side-channel event.
+
+    While the spinner is still visible (no tokens yet), replace the spinner
+    text with the new status message.  After the first token has arrived the
+    spinner is gone, so fall back to printing a dim ephemeral line above the
+    live markdown area.
+    """
+    msg = event.get("message") or event.get("phase") or ""
+    if not msg:
+        return
+    if first_token:
+        live.update(Spinner("dots", text=Text.assemble((" ", ""), (msg, "dim cyan"))))
+    else:
+        console.print(f"[dim]⚙ {msg}[/dim]")
+
+
+def _render_tool_call(event: dict) -> None:
+    """Render a ``tool_call`` side-channel event above the live area."""
+    tool = event.get("tool", "")
+    msg = event.get("message", "")
+    if tool and msg:
+        console.print(f"[dim cyan]⚙ {tool}[/dim cyan][dim] → {msg}[/dim]")
+    elif tool:
+        console.print(f"[dim cyan]⚙ {tool}[/dim cyan]")
+    elif msg:
+        console.print(f"[dim]⚙ {msg}[/dim]")
+
+
+def _render_error_event(event: dict) -> None:
+    """Render an ``error`` side-channel event."""
+    console.print(f"[red]✗ {event.get('message', str(event))}[/red]")
+
+
 # ── SSE helpers ────────────────────────────────────────────────────────────────
 
 def _iter_sse(response: httpx.Response) -> Any:
@@ -175,6 +211,19 @@ def _stream_once(
 
             first_token = True
             for event in _iter_sse(resp):
+                # ── Side-channel ki_event (nested under "ki_event" key) ───────
+                ki = event.get("ki_event")
+                if ki:
+                    kind = ki.get("type")
+                    if kind == "status":
+                        _render_status(ki, live, first_token)
+                    elif kind == "tool_call":
+                        _render_tool_call(ki)
+                    elif kind == "error":
+                        _render_error_event(ki)
+                    continue
+
+                # ── Standard OpenAI streaming format ──────────────────────────
                 if "usage" in event:
                     last_usage = event["usage"]
                 choices = event.get("choices", [])
