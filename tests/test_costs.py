@@ -5,15 +5,12 @@ Covers: estimate_cost (known model, unknown model, prefix matching, overrides),
         format_tokens, format_cost.
 """
 
-import pytest
-
 from kube_q.costs import (
     DEFAULT_COST_PER_1K,
     estimate_cost,
     format_cost,
     format_tokens,
 )
-
 
 # ── estimate_cost — known models ──────────────────────────────────────────────
 
@@ -51,7 +48,9 @@ def test_none_model_no_override_returns_none() -> None:
 
 
 def test_unknown_model_with_both_overrides_returns_cost() -> None:
-    cost = estimate_cost("custom-model", 1000, 2000, override_prompt=0.001, override_completion=0.002)
+    cost = estimate_cost(
+        "custom-model", 1000, 2000, override_prompt=0.001, override_completion=0.002
+    )
     assert cost is not None
     expected = (1000 / 1000) * 0.001 + (2000 / 1000) * 0.002
     assert abs(cost - expected) < 1e-9
@@ -82,7 +81,10 @@ def test_prefix_match_with_date_suffix() -> None:
 def test_prefix_match_gpt4o_mini() -> None:
     cost = estimate_cost("gpt-4o-mini-extended", 1000, 1000)
     assert cost is not None
-    expected = DEFAULT_COST_PER_1K["gpt-4o-mini"]["prompt"] + DEFAULT_COST_PER_1K["gpt-4o-mini"]["completion"]
+    expected = (
+        DEFAULT_COST_PER_1K["gpt-4o-mini"]["prompt"]
+        + DEFAULT_COST_PER_1K["gpt-4o-mini"]["completion"]
+    )
     assert abs(cost - expected) < 1e-9
 
 

@@ -261,14 +261,17 @@ def _make_v1_db(path: Path) -> None:
     conn.close()
 
 
-def test_migration_v1_to_v2_creates_token_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migration_v1_to_v2_creates_token_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "migration_test.db"
     _make_v1_db(db_path)
     monkeypatch.setattr(store_mod, "DB_PATH", db_path)
 
     conn = store_mod.get_db()
     # token_log table must exist
-    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = {row[0] for row in rows}
     assert "token_log" in tables
     # user_version must be 3 (v1→v2→v3 all run in sequence)
     version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -276,7 +279,9 @@ def test_migration_v1_to_v2_creates_token_log(tmp_path: Path, monkeypatch: pytes
     conn.close()
 
 
-def test_migration_v1_to_v2_adds_token_columns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migration_v1_to_v2_adds_token_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "migration_test2.db"
     _make_v1_db(db_path)
     monkeypatch.setattr(store_mod, "DB_PATH", db_path)
@@ -464,14 +469,17 @@ def test_migration_v2_to_v3_adds_fts_table(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(store_mod, "DB_PATH", db_path)
 
     conn = store_mod.get_db()
-    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = {row[0] for row in rows}
     assert "messages_fts" in tables
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert version == 3
     conn.close()
 
 
-def test_migration_v2_to_v3_adds_branch_columns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migration_v2_to_v3_adds_branch_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db_path = tmp_path / "v2_branch_cols.db"
     _make_v2_db(db_path)
     monkeypatch.setattr(store_mod, "DB_PATH", db_path)
