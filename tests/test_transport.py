@@ -493,15 +493,19 @@ def test_stream_query_usage_in_same_event_as_choices() -> None:
     assert returned_usage["total_tokens"] == 30
 
 
-# ── Side-channel event routing ────────────────────────────────────────────────
+# ── Side-channel event routing (ki_event wire format) ─────────────────────────
+#
+# The server wraps side-channel payloads under a "ki_event" key:
+#   {"ki_event": {"type": "status", "message": "..."}}
+# This leaves the standard OpenAI "choices" / "usage" path unaffected.
 
 
 @respx.mock
-def test_stream_query_status_events_do_not_add_to_text() -> None:
-    """status events are display-only; they must not contribute to full_text."""
+def test_stream_query_ki_status_events_do_not_add_to_text() -> None:
+    """ki_event status events are display-only; they must not affect full_text."""
     events = [
-        {"type": "status", "phase": "analyzing", "message": "Analyzing cluster…"},
-        {"type": "status", "message": "Fetching pods…"},
+        {"ki_event": {"type": "status", "phase": "analyzing", "message": "Analyzing…"}},
+        {"ki_event": {"type": "status", "message": "Fetching pods…"}},
         {"choices": [{"delta": {"content": "result"}, "finish_reason": "stop"}]},
     ]
     respx.post(f"{BASE}/v1/chat/completions").mock(
@@ -514,10 +518,10 @@ def test_stream_query_status_events_do_not_add_to_text() -> None:
 
 
 @respx.mock
-def test_stream_query_tool_call_events_do_not_add_to_text() -> None:
-    """tool_call events are display-only; they must not contribute to full_text."""
+def test_stream_query_ki_tool_call_events_do_not_add_to_text() -> None:
+    """ki_event tool_call events are display-only; they must not affect full_text."""
     events = [
-        {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching pods"},
+        {"ki_event": {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching"}},
         {"choices": [{"delta": {"content": "done"}, "finish_reason": "stop"}]},
     ]
     respx.post(f"{BASE}/v1/chat/completions").mock(
@@ -530,10 +534,10 @@ def test_stream_query_tool_call_events_do_not_add_to_text() -> None:
 
 
 @respx.mock
-def test_stream_query_error_events_do_not_add_to_text() -> None:
-    """error events are display-only; they must not contribute to full_text."""
+def test_stream_query_ki_error_events_do_not_add_to_text() -> None:
+    """ki_event error events are display-only; they must not affect full_text."""
     events = [
-        {"type": "error", "message": "Failed to fetch logs"},
+        {"ki_event": {"type": "error", "message": "Failed to fetch logs"}},
         {"choices": [{"delta": {"content": "partial"}, "finish_reason": "stop"}]},
     ]
     respx.post(f"{BASE}/v1/chat/completions").mock(
@@ -546,43 +550,49 @@ def test_stream_query_error_events_do_not_add_to_text() -> None:
 
 
 @respx.mock
-def test_stream_query_token_type_events_accumulate_text() -> None:
-    """Custom type=token events are treated as streaming tokens."""
+def test_stream_query_ki_usage_type_captured() -> None:
+    """ki_event with type=usage must populate the returned usage dict."""
     events = [
-        {"type": "token", "content": "The "},
-        {"type": "token", "content": "issue "},
-        {"type": "token", "content": "is clear."},
+        {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]},
+        {"ki_event": {"type": "usage", "prompt_tokens": 80, "completion_tokens": 120,
+                      "total_tokens": 200}},
     ]
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, content=_sse_body(*events),
                                     headers={"Content-Type": "text/event-stream"})
     )
     with patch("kube_q.transport.Live"):
-        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
-    assert text == "The issue is clear."
+        text, hitl, action_id, usage = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert text == "ok"
+    assert usage is not None
+    assert usage["prompt_tokens"] == 80
+    assert usage["completion_tokens"] == 120
 
 
 @respx.mock
-def test_stream_query_final_type_event_accumulates_text() -> None:
-    """Custom type=final event is treated as the final content chunk."""
+def test_stream_query_ki_usage_nested_key_captured() -> None:
+    """ki_event with a nested 'usage' key must also populate the returned usage dict."""
+    usage_data = {"prompt_tokens": 50, "completion_tokens": 75, "total_tokens": 125}
     events = [
-        {"type": "final", "content": "Root cause: missing env var"},
+        {"choices": [{"delta": {"content": "hi"}, "finish_reason": "stop"}]},
+        {"ki_event": {"type": "info", "usage": usage_data}},
     ]
     respx.post(f"{BASE}/v1/chat/completions").mock(
         return_value=httpx.Response(200, content=_sse_body(*events),
                                     headers={"Content-Type": "text/event-stream"})
     )
     with patch("kube_q.transport.Live"):
-        text, hitl, action_id, _ = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
-    assert text == "Root cause: missing env var"
+        text, hitl, action_id, usage = stream_query(BASE, _MESSAGES, _SESSION_ID, _USER)
+    assert usage is not None
+    assert usage["prompt_tokens"] == 50
 
 
 @respx.mock
-def test_stream_query_mixed_custom_and_openai_events() -> None:
-    """Mixed stream: status/tool_call before tokens, then standard OpenAI delta."""
+def test_stream_query_mixed_ki_and_openai_events() -> None:
+    """Mixed stream: ki_event side-channels before tokens, then standard OpenAI delta."""
     events = [
-        {"type": "status", "message": "Scanning…"},
-        {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching"},
+        {"ki_event": {"type": "status", "message": "Scanning…"}},
+        {"ki_event": {"type": "tool_call", "tool": "k8s.get_pods", "message": "Fetching"}},
         {"choices": [{"delta": {"content": "All "}}]},
         {"choices": [{"delta": {"content": "pods "}}]},
         {"choices": [{"delta": {"content": "healthy"}, "finish_reason": "stop"}]},

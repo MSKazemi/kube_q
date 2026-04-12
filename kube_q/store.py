@@ -309,8 +309,8 @@ def log_tokens(
         )
         conn.execute(
             "UPDATE sessions SET "
-            "total_prompt_tokens     = total_prompt_tokens     + ?, "
-            "total_completion_tokens = total_completion_tokens + ?, "
+            "total_prompt_tokens     = COALESCE(total_prompt_tokens,     0) + ?, "
+            "total_completion_tokens = COALESCE(total_completion_tokens, 0) + ?, "
             "updated_at = ? "
             "WHERE session_id = ?",
             (prompt_tokens, completion_tokens, now, session_id),

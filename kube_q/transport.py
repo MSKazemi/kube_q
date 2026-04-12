@@ -212,6 +212,8 @@ def _stream_once(
 
             first_token = True
             for event in _iter_sse(resp):
+                _logger.debug("sse event: %s", event)
+
                 # ── Side-channel ki_event (nested under "ki_event" key) ───────
                 ki = event.get("ki_event")
                 if ki:
@@ -222,11 +224,20 @@ def _stream_once(
                         _render_tool_call(ki)
                     elif kind == "error":
                         _render_error_event(ki)
+                    elif kind == "usage":
+                        # Server sends usage data inside a ki_event
+                        last_usage = ki
+                        _logger.debug("usage captured from ki_event: %s", ki)
+                    # Also check for a nested "usage" key inside ki_event
+                    if "usage" in ki:
+                        last_usage = ki["usage"]
+                        _logger.debug("usage captured from ki_event.usage: %s", last_usage)
                     continue
 
                 # ── Standard OpenAI streaming format ──────────────────────────
                 if "usage" in event:
                     last_usage = event["usage"]
+                    _logger.debug("usage captured from standard event: %s", last_usage)
                 choices = event.get("choices", [])
                 if not choices:
                     continue
@@ -252,6 +263,11 @@ def _stream_once(
                         )
 
     elapsed = time.monotonic() - t0
+    if last_usage is None:
+        _logger.debug(
+            "stream completed without usage data — "
+            "server may not support stream_options.include_usage"
+        )
     if full_text:
         # Content already rendered live above; print elapsed footer
         total_tokens = last_usage.get("total_tokens") if last_usage else None
