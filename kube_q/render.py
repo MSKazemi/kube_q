@@ -207,8 +207,10 @@ def _fmt_help() -> None:
 
         # ── Session history ───────────────────────────────────────────────────
         "[bold cyan]Session history[/bold cyan]\n\n"
-        "  [yellow]/sessions[/yellow]           List recent sessions  [dim](same as kq --list)[/dim]\n"
-        "  [yellow]/forget[/yellow]             Delete current session from local history  [dim](server data untouched)[/dim]\n\n"
+        "  [yellow]/sessions[/yellow]           List recent sessions  "
+        "[dim](same as kq --list)[/dim]\n"
+        "  [yellow]/forget[/yellow]             Delete current session from local history  "
+        "[dim](server data untouched)[/dim]\n\n"
 
         # ── History & branching ───────────────────────────────────────────────
         "[bold cyan]History & branching[/bold cyan]\n\n"
@@ -221,9 +223,11 @@ def _fmt_help() -> None:
 
         # ── Token usage ───────────────────────────────────────────────────────
         "[bold cyan]Token usage[/bold cyan]\n\n"
-        "  [yellow]/tokens[/yellow]             Show token counts and estimated cost for this session\n"
+        "  [yellow]/tokens[/yellow]             Show token counts and estimated cost "
+        "for this session\n"
         "  [yellow]/cost[/yellow]               Alias for [yellow]/tokens[/yellow]\n"
-        "  Override cost rates via [dim]KUBE_Q_COST_PER_1K_PROMPT[/dim] and [dim]KUBE_Q_COST_PER_1K_COMPLETION[/dim] env vars.\n\n"
+        "  Override cost rates via [dim]KUBE_Q_COST_PER_1K_PROMPT[/dim] and "
+        "[dim]KUBE_Q_COST_PER_1K_COMPLETION[/dim] env vars.\n\n"
 
         # ── HITL (Human-in-the-Loop) ──────────────────────────────────────────
         "[bold cyan]Human-in-the-Loop (HITL)[/bold cyan]\n\n"
@@ -251,16 +255,20 @@ def _fmt_help() -> None:
         "  [dim]kq --debug[/dim]                   Show raw HTTP request/response log\n"
         "  [dim]kq --version[/dim]                 Print version and exit\n"
         "  [dim]kq --list[/dim]                    List recent sessions and exit\n"
-        "  [dim]kq --search \"...[/dim]\"             Full-text search across session history and exit\n"
+        "  [dim]kq --search \"...[/dim]\"             Full-text search across session "
+        "history and exit\n"
         "  [dim]kq --session-id <id>[/dim]         Resume a previous session by ID\n"
         "  [dim]kq --model <name>[/dim]            Override model name sent in requests\n"
         "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
         "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
         "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable  [dim](avoids 401 errors)[/dim]\n"  # noqa: E501
-        "  [dim]KUBE_Q_MODEL=...[/dim]                  Override model name via environment variable\n"
-        "  [dim]KUBE_Q_USER_NAME=...[/dim]              Set your display name via environment variable\n"
-        "  [dim]KUBE_Q_AGENT_NAME=...[/dim]             Set assistant name via environment variable\n\n"
+        "  [dim]KUBE_Q_MODEL=...[/dim]                  Override model name via "
+        "environment variable\n"
+        "  [dim]KUBE_Q_USER_NAME=...[/dim]              Set your display name via "
+        "environment variable\n"
+        "  [dim]KUBE_Q_AGENT_NAME=...[/dim]             Set assistant name via "
+        "environment variable\n\n"
 
         # ── Config file ───────────────────────────────────────────────────────
         "[bold cyan]Config (~/.kube-q/.env or ./.env)[/bold cyan]\n\n"
