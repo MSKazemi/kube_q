@@ -24,14 +24,17 @@ from rich.spinner import Spinner
 from rich.text import Text
 
 from kube_q.config import CONFIG_DIR
-from kube_q.render import _fmt_help, _print_logo, console
+from kube_q.render import _fmt_help, _print_logo, console, format_branches, format_search_results
 from kube_q.transport import check_health, non_stream_query, stream_query
+from kube_q import costs, store
 
 # ── Prompt session config ─────────────────────────────────────────────────────
 
 _SLASH_COMMANDS = [
     "/new", "/id", "/state", "/clear", "/save", "/approve", "/deny",
-    "/help", "/ns", "/quit", "/exit", "/q",
+    "/help", "/ns", "/sessions", "/forget", "/tokens", "/cost",
+    "/search", "/branch", "/branches", "/title",
+    "/quit", "/exit", "/q",
 ]
 _HISTORY_FILE = str(CONFIG_DIR / "history")
 
@@ -164,6 +167,40 @@ class SessionState:
     hitl_pending: bool = False
     pending_action_id: str | None = None
     current_namespace: str | None = None
+    last_request_id: str | None = None
+
+
+# ── Session list display ──────────────────────────────────────────────────────
+
+def _print_sessions_table(sessions: list[dict]) -> None:
+    """Render a Rich table of sessions."""
+    from rich.table import Table
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    table = Table(
+        "Session ID", "Title", "Messages", "Tokens", "Namespace", "Updated",
+        title="[bold cyan]Recent Sessions[/bold cyan]",
+        border_style="dim cyan",
+        show_lines=False,
+    )
+    for s in sessions:
+        title = s["title"] or "[dim](untitled)[/dim]"
+        ns = s["namespace"] or "[dim]—[/dim]"
+        updated = s["updated_at"][:19].replace("T", " ") if s["updated_at"] else "—"
+        total_tok = s.get("total_tokens", 0)
+        tok_str = f"{total_tok:,}" if total_tok else "[dim]—[/dim]"
+        table.add_row(
+            s["session_id"][:36],
+            title,
+            str(s["message_count"]),
+            tok_str,
+            ns,
+            updated,
+        )
+    console.print(table)
 
 
 # ── Conversation persistence ──────────────────────────────────────────────────
@@ -187,12 +224,62 @@ def _save_conversation(
     console.print(f"[dim]Conversation saved to[/dim] {path}")
 
 
+# ── Token usage panel ─────────────────────────────────────────────────────────
+
+def _print_token_panel(
+    session_id: str,
+    override_prompt: float | None = None,
+    override_completion: float | None = None,
+) -> None:
+    """Print a Rich panel showing token usage and estimated cost for a session."""
+    tok = store.get_session_tokens(session_id)
+    last = store.get_last_usage(session_id)
+
+    model = last.get("model") if last else None
+    session_cost = costs.estimate_cost(
+        model,
+        tok["total_prompt_tokens"],
+        tok["total_completion_tokens"],
+        override_prompt,
+        override_completion,
+    )
+
+    body = (
+        f"  [bold]This session:[/bold]\n"
+        f"    Prompt:     {tok['total_prompt_tokens']:,} tokens\n"
+        f"    Completion: {tok['total_completion_tokens']:,} tokens\n"
+        f"    Total:      {tok['total_tokens']:,} tokens\n"
+        f"    Requests:   {tok['request_count']}\n"
+        f"    Est. cost:  {costs.format_cost(session_cost)}"
+    )
+
+    if last:
+        lp = last["prompt_tokens"]
+        lc = last["completion_tokens"]
+        last_cost = costs.estimate_cost(
+            last.get("model"), lp, lc, override_prompt, override_completion
+        )
+        body += (
+            f"\n\n  [bold]Last response:[/bold]\n"
+            f"    {costs.format_tokens(lp, lc)} ({costs.format_cost(last_cost)})"
+        )
+
+    console.print(Panel(
+        body,
+        title="[bold cyan]Token Usage[/bold cyan]",
+        border_style="dim cyan",
+        expand=False,
+        padding=(0, 1),
+    ))
+
+
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
 def run_repl(
     url: str,
     stream: bool,
     initial_conversation_id: str | None = None,
+    initial_session_id: str | None = None,
     show_header: bool = True,
     initial_messages: list[dict] | None = None,
     user_id: str | None = None,
@@ -206,12 +293,26 @@ def run_repl(
     startup_retry_interval: int = 5,
     user_name: str = "You",
     agent_name: str = "kube-q",
+    model: str = "kubeintellect-v2",
+    cost_prompt_override: float | None = None,
+    cost_completion_override: float | None = None,
 ) -> None:
+    # initial_session_id takes precedence over initial_conversation_id
+    effective_id = initial_session_id or initial_conversation_id
+    resolved_user_id = user_id or _load_or_create_user_id()
+
     state = SessionState(
-        conversation_id=initial_conversation_id or str(uuid.uuid4()),
-        user_id=user_id or _load_or_create_user_id(),
+        conversation_id=effective_id or str(uuid.uuid4()),
+        user_id=resolved_user_id,
         messages=list(initial_messages) if initial_messages else [],
     )
+
+    # Hydrate from store when resuming a named session
+    if initial_session_id and not initial_messages:
+        stored = store.load_messages(initial_session_id)
+        if stored:
+            state.messages = stored
+            console.print(f"[dim]Resumed {len(stored)} messages.[/dim]")
     _prepend_ns_once = False
     _pending_retry: str = ""  # pre-fills next prompt after a failed send
 
@@ -337,10 +438,23 @@ def run_repl(
                 if state.hitl_pending
                 else "  [dim]HITL pending [/dim] no"
             )
+            tok = store.get_session_tokens(state.conversation_id)
+            last_u = store.get_last_usage(state.conversation_id)
+            model = last_u.get("model") if last_u else None
+            cost = costs.estimate_cost(
+                model,
+                tok["total_prompt_tokens"],
+                tok["total_completion_tokens"],
+                cost_prompt_override,
+                cost_completion_override,
+            )
+            cost_part = f" (~{costs.format_cost(cost)})" if tok["total_tokens"] else ""
+            tokens_line = f"  [dim]Tokens       [/dim] {tok['total_tokens']:,}{cost_part}"
             console.print(Panel(
                 f"  [dim]Conversation [/dim] {state.conversation_id}\n"
                 f"  [dim]User ID      [/dim] {state.user_id}\n"
                 f"  [dim]Messages     [/dim] {len(state.messages)}\n"
+                f"{tokens_line}\n"
                 f"{ns_line}\n"
                 f"{hitl_line}",
                 title="[bold cyan]Session State[/bold cyan]",
@@ -391,6 +505,76 @@ def run_repl(
                 console.print(f"[dim]Active namespace set to[/dim] [bold]{ns_arg}[/bold]")
             continue
 
+        if user_input.lower() == "/sessions":
+            _print_sessions_table(store.list_sessions(20))
+            continue
+
+        if user_input.lower() == "/forget":
+            console.print(
+                f"[yellow]This will delete session [bold]{state.conversation_id}[/bold] "
+                "from local history (server-side data is not affected).[/yellow]"
+            )
+            try:
+                confirm = pt_session.prompt(
+                    FormattedText([("bold fg:ansiyellow", "Delete? [y/N] ")])
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                confirm = ""
+            if confirm == "y":
+                store.delete_session(state.conversation_id)
+                new_id = str(uuid.uuid4())
+                state.conversation_id = new_id
+                state.messages = []
+                state.hitl_pending = False
+                state.pending_action_id = None
+                console.print(f"[dim]Session deleted. New session started:[/dim] {new_id}")
+            else:
+                console.print("[dim]Cancelled.[/dim]")
+            continue
+
+        if user_input.lower() in ("/tokens", "/cost"):
+            _print_token_panel(
+                state.conversation_id, cost_prompt_override, cost_completion_override
+            )
+            continue
+
+        if user_input.lower().startswith("/search"):
+            parts = user_input.split(maxsplit=1)
+            query = parts[1].strip() if len(parts) > 1 else ""
+            if not query:
+                console.print("[yellow]Usage: /search <query>[/yellow]")
+            else:
+                results = store.search_sessions(query)
+                if results:
+                    format_search_results(results)
+                else:
+                    console.print(f"[dim]No sessions matched '{query}'.[/dim]")
+            continue
+
+        if user_input.lower() == "/branch":
+            new_id = str(uuid.uuid4())
+            n = len(state.messages)
+            store.branch_session(state.conversation_id, new_id, n)
+            state.conversation_id = new_id
+            console.print(f"[dim]Branched at message {n}. New session:[/dim] {new_id}")
+            console.print("[dim]Original session preserved. Use /sessions to see both.[/dim]")
+            continue
+
+        if user_input.lower() == "/branches":
+            branches = store.list_branches(state.conversation_id)
+            format_branches(branches, state.conversation_id)
+            continue
+
+        if user_input.lower().startswith("/title"):
+            parts = user_input.split(maxsplit=1)
+            new_title = parts[1].strip() if len(parts) > 1 else ""
+            if not new_title:
+                console.print("[yellow]Usage: /title <text>[/yellow]")
+            else:
+                store.rename_session(state.conversation_id, new_title)
+                console.print(f"[dim]Session title set to '{new_title}'[/dim]")
+            continue
+
         if user_input.lower() == "/approve":
             user_input = "approve"
             state.hitl_pending = False
@@ -430,15 +614,20 @@ def run_repl(
             _prepend_ns_once = False
         state.messages.append({"role": "user", "content": user_input})
 
+        request_id = f"req-{uuid.uuid4()}"
+        state.last_request_id = request_id
+
         if stream:
-            response_text, state.hitl_pending, action_id = stream_query(
+            response_text, state.hitl_pending, action_id, usage = stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
+                request_id=request_id, model=model,
             )
         else:
-            response_text, state.hitl_pending, action_id = non_stream_query(
+            response_text, state.hitl_pending, action_id, usage = non_stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
+                request_id=request_id, model=model,
             )
 
         if not response_text:
@@ -456,6 +645,21 @@ def run_repl(
             state.pending_action_id = None
 
         state.messages.append({"role": "assistant", "content": response_text})
+
+        # ── Persist to local store (best-effort) ──────────────────────────────
+        store.upsert_session(state.conversation_id, state.user_id, state.current_namespace)
+        store.append_message(state.conversation_id, "user", user_input, request_id)
+        store.append_message(state.conversation_id, "assistant", response_text, request_id)
+        if len(state.messages) == 2:  # first exchange
+            store.set_session_title(state.conversation_id, user_input[:60])
+        if usage:
+            store.log_tokens(
+                state.conversation_id,
+                state.last_request_id,
+                usage.get("model"),
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+            )
 
         if state.hitl_pending:
             console.print(Panel(
