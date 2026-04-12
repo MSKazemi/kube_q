@@ -199,7 +199,8 @@ def _stream_once(
                 live.stop()
                 console.print(
                     "[red]Authentication required.[/red] "
-                    "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
+                    "Set [bold]KUBE_Q_API_KEY[/bold] or pass "
+                    "[bold]--api-key[/bold] with a valid key.\n"
                     "[dim]Ask your system administrator for an API key.[/dim]"
                 )
                 return "", False, None, None
@@ -277,7 +278,10 @@ def stream_query(
     """Send a streaming chat request. Returns (full_text, hitl_pending, action_id, usage)."""
     if request_id is None:
         request_id = f"req-{uuid.uuid4()}"
-    _logger.info("stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
+    _logger.info(
+        "stream_query session=%s user=%s request=%s url=%s",
+        session_id, user, request_id, url,
+    )
     payload = _build_payload(messages, user, True, model)
     headers = _request_headers(api_key, session_id, request_id, accept="text/event-stream")
 
@@ -318,10 +322,16 @@ def non_stream_query(
     request_id: str | None = None,
     model: str = "kubeintellect-v2",
 ) -> tuple[str, bool, str | None, dict | None]:
-    """Send a non-streaming chat request. Returns (response_text, hitl_pending, action_id, usage)."""
+    """Send a non-streaming chat request.
+
+    Returns (response_text, hitl_pending, action_id, usage).
+    """
     if request_id is None:
         request_id = f"req-{uuid.uuid4()}"
-    _logger.info("non_stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
+    _logger.info(
+        "non_stream_query session=%s user=%s request=%s url=%s",
+        session_id, user, request_id, url,
+    )
     payload = _build_payload(messages, user, False, model)
     headers = _request_headers(api_key, session_id, request_id)
 
@@ -344,7 +354,8 @@ def non_stream_query(
                 if resp.status_code == 401:
                     console.print(
                         "[red]Authentication required.[/red] "
-                        "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
+                        "Set [bold]KUBE_Q_API_KEY[/bold] or pass "
+                        "[bold]--api-key[/bold] with a valid key.\n"
                         "[dim]Ask your system administrator for an API key.[/dim]"
                     )
                     return "", False, None, None

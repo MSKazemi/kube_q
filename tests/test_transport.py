@@ -423,7 +423,12 @@ def test_stream_query_returns_none_usage_when_absent() -> None:
 
 @respx.mock
 def test_non_stream_query_returns_usage_dict_when_present() -> None:
-    usage = {"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 150, "model": "gpt-4o-mini"}
+    usage = {
+        "prompt_tokens": 50,
+        "completion_tokens": 100,
+        "total_tokens": 150,
+        "model": "gpt-4o-mini",
+    }
     body = {
         "choices": [{"message": {"content": "response"}, "finish_reason": "stop"}],
         "usage": usage,
