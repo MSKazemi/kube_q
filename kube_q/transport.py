@@ -99,13 +99,19 @@ def _build_payload(
     messages: list[dict],
     user: str,
     stream: bool,
+    model: str = "kubeintellect-v2",
 ) -> dict:
-    return {
-        "model": "kubeintellect-v2",
+    payload: dict = {
+        "model": model,
         "messages": [messages[-1]],
         "stream": stream,
         "user": user,
     }
+    if stream:
+        # Request a usage event at the end of the SSE stream.
+        # OpenAI-compatible servers require this; unknown servers ignore it.
+        payload["stream_options"] = {"include_usage": True}
+    return payload
 
 
 # ── SSE helpers ────────────────────────────────────────────────────────────────
@@ -133,11 +139,16 @@ def _stream_once(
     payload: dict,
     headers: dict,
     client: httpx.Client,
-) -> tuple[str, bool, str | None]:
-    """One streaming attempt. Raises httpx.TransportError on connection failure."""
+) -> tuple[str, bool, str | None, dict | None]:
+    """One streaming attempt. Raises httpx.TransportError on connection failure.
+
+    Returns (full_text, hitl_pending, action_id, usage_dict).
+    usage_dict is the raw "usage" block from the final SSE event, or None.
+    """
     full_text = ""
     hitl_pending = False
     action_id: str | None = None
+    last_usage: dict | None = None
     t0 = time.monotonic()
 
     with Live(
@@ -155,15 +166,17 @@ def _stream_once(
                     "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
                     "[dim]Ask your system administrator for an API key.[/dim]"
                 )
-                return "", False, None
+                return "", False, None, None
             if resp.status_code != 200:
                 body = resp.read().decode()
                 live.stop()
                 console.print(f"[red][HTTP {resp.status_code}] {body}[/red]")
-                return "", False, None
+                return "", False, None, None
 
             first_token = True
             for event in _iter_sse(resp):
+                if "usage" in event:
+                    last_usage = event["usage"]
                 choices = event.get("choices", [])
                 if not choices:
                     continue
@@ -191,9 +204,11 @@ def _stream_once(
     elapsed = time.monotonic() - t0
     if full_text:
         # Content already rendered live above; print elapsed footer
-        console.print(f"[bold cyan]kube-q[/bold cyan]  [dim]({elapsed:.1f}s)[/dim]")
+        total_tokens = last_usage.get("total_tokens") if last_usage else None
+        token_str = f" · {total_tokens:,} tokens" if total_tokens else ""
+        console.print(f"[bold cyan]kube-q[/bold cyan]  [dim]({elapsed:.1f}s{token_str})[/dim]")
         console.print()
-    return full_text, hitl_pending, action_id
+    return full_text, hitl_pending, action_id, last_usage
 
 
 # ── Public query functions ─────────────────────────────────────────────────────
@@ -208,12 +223,13 @@ def stream_query(
     ca_cert: str | None = None,
     timeout: float = 120.0,
     request_id: str | None = None,
-) -> tuple[str, bool, str | None]:
-    """Send a streaming chat request. Returns (full_text, hitl_pending, action_id)."""
+    model: str = "kubeintellect-v2",
+) -> tuple[str, bool, str | None, dict | None]:
+    """Send a streaming chat request. Returns (full_text, hitl_pending, action_id, usage)."""
     if request_id is None:
         request_id = f"req-{uuid.uuid4()}"
     _logger.info("stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
-    payload = _build_payload(messages, user, True)
+    payload = _build_payload(messages, user, True, model)
     headers = _request_headers(api_key, session_id, request_id, accept="text/event-stream")
 
     with _make_client(ca_cert, timeout=timeout) as client:
@@ -238,7 +254,7 @@ def stream_query(
         "[red]  All retries failed.[/red] "
         "[dim]Check your connection and API URL, then try again.[/dim]"
     )
-    return "", False, None
+    return "", False, None, None
 
 
 def non_stream_query(
@@ -251,12 +267,13 @@ def non_stream_query(
     ca_cert: str | None = None,
     timeout: float = 120.0,
     request_id: str | None = None,
-) -> tuple[str, bool, str | None]:
-    """Send a non-streaming chat request. Returns (response_text, hitl_pending, action_id)."""
+    model: str = "kubeintellect-v2",
+) -> tuple[str, bool, str | None, dict | None]:
+    """Send a non-streaming chat request. Returns (response_text, hitl_pending, action_id, usage)."""
     if request_id is None:
         request_id = f"req-{uuid.uuid4()}"
     _logger.info("non_stream_query session=%s user=%s request=%s url=%s", session_id, user, request_id, url)
-    payload = _build_payload(messages, user, False)
+    payload = _build_payload(messages, user, False, model)
     headers = _request_headers(api_key, session_id, request_id)
 
     with _make_client(ca_cert, timeout=timeout) as client:
@@ -281,10 +298,10 @@ def non_stream_query(
                         "Set [bold]KUBE_Q_API_KEY[/bold] or pass [bold]--api-key[/bold] with a valid key.\n"
                         "[dim]Ask your system administrator for an API key.[/dim]"
                     )
-                    return "", False, None
+                    return "", False, None, None
                 if resp.status_code != 200:
                     console.print(f"[red][HTTP {resp.status_code}] {resp.text}[/red]")
-                    return "", False, None
+                    return "", False, None, None
 
                 try:
                     data = resp.json()
@@ -292,7 +309,7 @@ def non_stream_query(
                 except json.JSONDecodeError as e:
                     console.print(f"[red]Invalid JSON from server: {e}[/red]")
                     _logger.error("non_stream invalid JSON: %s — body=%s", e, resp.text[:500])
-                    return "", False, None
+                    return "", False, None, None
 
                 try:
                     choice_data = data["choices"][0]
@@ -301,10 +318,11 @@ def non_stream_query(
                     console.print(
                         f"[red]Unexpected response structure (missing {e}): {data}[/red]"
                     )
-                    return "", False, None
+                    return "", False, None, None
 
                 hitl_pending = choice_data.get("hitl_required", False)
                 action_id = choice_data.get("action_id") if hitl_pending else None
+                usage: dict | None = data.get("usage")
 
                 if not hitl_pending and "🛑" in text:
                     hitl_pending = True
@@ -313,11 +331,13 @@ def non_stream_query(
                         "— server should be upgraded to send hitl_required.[/dim]"
                     )
 
+                total_tokens = usage.get("total_tokens") if usage else None
+                token_str = f" · {total_tokens:,} tokens" if total_tokens else ""
                 console.print(
-                    f"[bold cyan]kube-q:[/bold cyan]  [dim]({elapsed:.1f}s)[/dim]"
+                    f"[bold cyan]kube-q:[/bold cyan]  [dim]({elapsed:.1f}s{token_str})[/dim]"
                 )
                 print_response(text)
-                return text, hitl_pending, action_id
+                return text, hitl_pending, action_id, usage
 
             except httpx.TransportError as exc:
                 reason = _describe_error(url, exc)
@@ -330,7 +350,7 @@ def non_stream_query(
         "[red]  All retries failed.[/red] "
         "[dim]Check your connection and API URL, then try again.[/dim]"
     )
-    return "", False, None
+    return "", False, None, None
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

@@ -16,20 +16,28 @@ Usage:
   kq --version                # print version and exit
   kq --user-name Alice        # your display name in the prompt (default: You)
   kq --agent-name MyBot       # assistant name in saved conversations (default: kube-q)
+  kq --list                   # list recent sessions and exit
+  kq --search "pod crash"     # full-text search across session history and exit
+  kq --session-id <id>        # resume a previous session by ID
+  kq --model gpt-4o           # override model name sent in requests
 
 Environment variables:
   KUBE_Q_URL=http://...           # set API URL
   KUBE_Q_API_KEY=...             # set API key (required when server auth is enabled)
+  KUBE_Q_MODEL=kubeintellect-v2  # model name sent in requests
 
 Config (~/.kube-q/.env or ./.env):
   KUBE_Q_URL=http://localhost:8000
   KUBE_Q_API_KEY=                  # required only when server auth is enabled
+  KUBE_Q_MODEL=kubeintellect-v2
   KUBE_Q_TIMEOUT=120
   KUBE_Q_STREAM=true
   KUBE_Q_OUTPUT=rich               # rich | plain
   KUBE_Q_LOG_LEVEL=INFO            # DEBUG | INFO | WARNING | ERROR
   KUBE_Q_USER_NAME=You
   KUBE_Q_AGENT_NAME=kube-q
+  KUBE_Q_COST_PER_1K_PROMPT=0.003      # override cost rate for /tokens
+  KUBE_Q_COST_PER_1K_COMPLETION=0.006  # override cost rate for /tokens
 
 In-REPL commands:
   /new           — start a new conversation (new conversation ID)
@@ -38,6 +46,14 @@ In-REPL commands:
   /clear         — clear the terminal screen
   /save [file]   — save conversation to markdown file
   /ns <name>     — set active namespace (/ns with no arg clears it)
+  /sessions      — list recent sessions (same as kq --list)
+  /forget        — delete current session from local history
+  /tokens        — show token counts and estimated cost for this session
+  /cost          — alias for /tokens
+  /search <q>    — full-text search across all past sessions
+  /branch        — fork this conversation at the current point
+  /branches      — list all forks of this session
+  /title <text>  — rename the current session
   /approve       — approve a pending HITL action
   /deny          — deny a pending HITL action
   /help          — show full in-REPL help
@@ -63,9 +79,10 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from urllib.parse import urlparse
 
+from kube_q import store
 from kube_q.config import load_config, setup_logging
-from kube_q.render import console, set_output_plain
-from kube_q.session import _load_or_create_user_id, run_repl
+from kube_q.render import console, format_search_results, set_output_plain
+from kube_q.session import _load_or_create_user_id, _print_sessions_table, run_repl
 from kube_q.transport import non_stream_query, set_debug, stream_query
 
 try:
@@ -84,6 +101,7 @@ def run_single_query(
     api_key: str | None = None,
     ca_cert: str | None = None,
     timeout: float = 120.0,
+    model: str = "kubeintellect-v2",
 ) -> None:
     conversation_id = str(uuid.uuid4())
     if user_id is None:
@@ -92,10 +110,10 @@ def run_single_query(
 
     if stream:
         stream_query(url, messages, conversation_id, user_id,
-                     api_key=api_key, ca_cert=ca_cert, timeout=timeout)
+                     api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model)
     else:
         non_stream_query(url, messages, conversation_id, user_id,
-                         api_key=api_key, ca_cert=ca_cert, timeout=timeout)
+                         api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -138,6 +156,24 @@ def main() -> None:
         "--conversation-id",
         default=None,
         help="Resume an existing conversation by ID",
+    )
+    parser.add_argument(
+        "--session-id",
+        default=None,
+        metavar="ID",
+        help="Resume a previous session by ID (loads history from local store)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        default=False,
+        help="List recent sessions and exit (no server connection needed)",
+    )
+    parser.add_argument(
+        "--search",
+        default=None,
+        metavar="QUERY",
+        help="Full-text search across session history and exit (no server connection needed)",
     )
     parser.add_argument(
         "--user-id",
@@ -192,6 +228,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--model",
+        default=cfg.model,
+        help=(
+            "Model name to send in requests "
+            "(env: KUBE_Q_MODEL, config: model, default: kubeintellect-v2)"
+        ),
+    )
+    parser.add_argument(
         "--debug", "--verbose",
         dest="debug",
         action="store_true",
@@ -225,15 +269,29 @@ def main() -> None:
                 f"[bold]{args.url}[/bold] — consider using HTTPS in production."
             )
 
+    if args.list:
+        _print_sessions_table(store.list_sessions(20))
+        return
+
+    if args.search:
+        results = store.search_sessions(args.search, limit=20)
+        if results:
+            format_search_results(results)
+        else:
+            console.print(f"[dim]No sessions matched '{args.search}'.[/dim]")
+        return
+
     if args.query:
         run_single_query(
             args.url, args.query, stream,
             user_id=user_id, api_key=args.api_key, ca_cert=args.ca_cert,
-            timeout=cfg.timeout,
+            timeout=cfg.timeout, model=args.model,
         )
     else:
         run_repl(
-            args.url, stream, args.conversation_id,
+            args.url, stream,
+            initial_conversation_id=args.conversation_id,
+            initial_session_id=args.session_id,
             user_id=user_id, quiet=args.quiet,
             api_key=args.api_key, ca_cert=args.ca_cert,
             query_timeout=cfg.timeout,
@@ -243,6 +301,9 @@ def main() -> None:
             startup_retry_interval=cfg.startup_retry_interval,
             user_name=args.user_name,
             agent_name=args.agent_name,
+            model=args.model,
+            cost_prompt_override=cfg.cost_per_1k_prompt,
+            cost_completion_override=cfg.cost_per_1k_completion,
         )
 
 

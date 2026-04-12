@@ -92,6 +92,74 @@ def print_response(text: str) -> None:
 
 # ── Help panel ────────────────────────────────────────────────────────────────
 
+def format_search_results(results: list[dict]) -> None:
+    """Print a Rich table of FTS5 search results.
+
+    Columns: Session (8-char), Title, Updated, Msgs, Match.
+    >>> <<< markers in snippets are rendered as bold-yellow Rich markup.
+    """
+    from rich.table import Table
+
+    if not results:
+        console.print("[dim]No results found.[/dim]")
+        return
+
+    table = Table(
+        "Session", "Title", "Updated", "Msgs", "Match",
+        title="[bold cyan]Search Results[/bold cyan]",
+        border_style="dim cyan",
+        show_lines=True,
+    )
+    for r in results:
+        snippet = r.get("snippet") or ""
+        # Replace FTS5 markers with Rich markup
+        snippet = snippet.replace(">>>", "[bold yellow]").replace("<<<", "[/bold yellow]")
+        title = r.get("title") or "[dim](untitled)[/dim]"
+        updated = (r.get("updated_at") or "")[:16].replace("T", " ")
+        table.add_row(
+            (r.get("session_id") or "")[:8],
+            title,
+            updated,
+            str(r.get("message_count", 0)),
+            snippet,
+        )
+    console.print(table)
+
+
+def format_branches(branches: list[dict], current_id: str) -> None:
+    """Print a Rich table of branched sessions.
+
+    Columns: Session (8-char), Title, Branched at, Msgs, Updated.
+    The current session row is prefixed with a → marker.
+    """
+    from rich.table import Table
+
+    if not branches:
+        console.print("[dim]No branches of this session.[/dim]")
+        return
+
+    table = Table(
+        "", "Session", "Title", "Branched at", "Msgs", "Updated",
+        title="[bold cyan]Branches[/bold cyan]",
+        border_style="dim cyan",
+        show_lines=False,
+    )
+    for b in branches:
+        marker = "[bold cyan]→[/bold cyan]" if b["session_id"] == current_id else ""
+        title = b.get("title") or "[dim](untitled)[/dim]"
+        updated = (b.get("updated_at") or "")[:16].replace("T", " ")
+        bp = str(b.get("branch_point") or "—")
+        table.add_row(
+            marker,
+            (b.get("session_id") or "")[:8],
+            title,
+            bp,
+            str(b.get("message_count", 0)),
+            updated,
+        )
+    console.print(table)
+
+
 def _fmt_help() -> None:
     console.print(Panel(
         # ── Sending messages ──────────────────────────────────────────────────
@@ -137,6 +205,26 @@ def _fmt_help() -> None:
         "  [yellow]/ns <name>[/yellow]          Set active namespace — prepended to every query\n"
         "  [yellow]/ns[/yellow]                 Clear active namespace\n\n"
 
+        # ── Session history ───────────────────────────────────────────────────
+        "[bold cyan]Session history[/bold cyan]\n\n"
+        "  [yellow]/sessions[/yellow]           List recent sessions  [dim](same as kq --list)[/dim]\n"
+        "  [yellow]/forget[/yellow]             Delete current session from local history  [dim](server data untouched)[/dim]\n\n"
+
+        # ── History & branching ───────────────────────────────────────────────
+        "[bold cyan]History & branching[/bold cyan]\n\n"
+        "  [yellow]/search <query>[/yellow]     Full-text search across all past sessions\n"
+        "  [yellow]/branch[/yellow]             Fork this conversation at the current point\n"
+        "  [yellow]/branches[/yellow]           List all forks of (and siblings of) this session\n"
+        "  [yellow]/title <text>[/yellow]       Rename the current session\n"
+        "  FTS5 boolean syntax supported: [dim]/search pods AND NOT staging[/dim]\n"
+        "  [dim]kq --search \"query\"[/dim]    Same as /search, but from the shell\n\n"
+
+        # ── Token usage ───────────────────────────────────────────────────────
+        "[bold cyan]Token usage[/bold cyan]\n\n"
+        "  [yellow]/tokens[/yellow]             Show token counts and estimated cost for this session\n"
+        "  [yellow]/cost[/yellow]               Alias for [yellow]/tokens[/yellow]\n"
+        "  Override cost rates via [dim]KUBE_Q_COST_PER_1K_PROMPT[/dim] and [dim]KUBE_Q_COST_PER_1K_COMPLETION[/dim] env vars.\n\n"
+
         # ── HITL (Human-in-the-Loop) ──────────────────────────────────────────
         "[bold cyan]Human-in-the-Loop (HITL)[/bold cyan]\n\n"
         "  When kube-q proposes a [bold]write action[/bold] (deploy, delete, scale, etc.)\n"
@@ -162,20 +250,26 @@ def _fmt_help() -> None:
         "  [dim]kq --no-banner[/dim]               Suppress logo  [dim](useful for screen recordings)[/dim]\n"  # noqa: E501
         "  [dim]kq --debug[/dim]                   Show raw HTTP request/response log\n"
         "  [dim]kq --version[/dim]                 Print version and exit\n"
+        "  [dim]kq --list[/dim]                    List recent sessions and exit\n"
+        "  [dim]kq --search \"...[/dim]\"             Full-text search across session history and exit\n"
+        "  [dim]kq --session-id <id>[/dim]         Resume a previous session by ID\n"
+        "  [dim]kq --model <name>[/dim]            Override model name sent in requests\n"
         "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
         "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
         "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable  [dim](avoids 401 errors)[/dim]\n"  # noqa: E501
+        "  [dim]KUBE_Q_MODEL=...[/dim]                  Override model name via environment variable\n"
         "  [dim]KUBE_Q_USER_NAME=...[/dim]              Set your display name via environment variable\n"
         "  [dim]KUBE_Q_AGENT_NAME=...[/dim]             Set assistant name via environment variable\n\n"
 
         # ── Config file ───────────────────────────────────────────────────────
         "[bold cyan]Config (~/.kube-q/.env or ./.env)[/bold cyan]\n\n"
-        "  [dim]KUBE_Q_URL, KUBE_Q_API_KEY[/dim]\n"
+        "  [dim]KUBE_Q_URL, KUBE_Q_API_KEY, KUBE_Q_MODEL[/dim]\n"
         "  [dim]KUBE_Q_TIMEOUT, KUBE_Q_HEALTH_TIMEOUT, KUBE_Q_NAMESPACE_TIMEOUT[/dim]\n"
         "  [dim]KUBE_Q_STARTUP_RETRY_TIMEOUT, KUBE_Q_STARTUP_RETRY_INTERVAL[/dim]\n"
         "  [dim]KUBE_Q_STREAM, KUBE_Q_OUTPUT, KUBE_Q_LOG_LEVEL[/dim]\n"
-        "  [dim]KUBE_Q_USER_NAME, KUBE_Q_AGENT_NAME[/dim]\n\n"
+        "  [dim]KUBE_Q_USER_NAME, KUBE_Q_AGENT_NAME[/dim]\n"
+        "  [dim]KUBE_Q_COST_PER_1K_PROMPT, KUBE_Q_COST_PER_1K_COMPLETION[/dim]\n\n"
         "  Logs are written to [dim]~/.kube-q/kube-q.log[/dim]",
         title="[bold cyan]kube-q Help[/bold cyan]",
         border_style="cyan",

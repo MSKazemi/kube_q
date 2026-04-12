@@ -39,9 +39,16 @@ class Config:
     output:    str  = "rich"   # "rich" | "plain"
     log_level: str  = "INFO"
 
+    # Model
+    model: str = "kubeintellect-v2"
+
     # Display names
     user_name:  str = "You"
     agent_name: str = "kube-q"
+
+    # Cost estimation overrides (USD per 1K tokens)
+    cost_per_1k_prompt:      float | None = None
+    cost_per_1k_completion:  float | None = None
 
 
 # ── .env file support ─────────────────────────────────────────────────────────
@@ -58,8 +65,11 @@ _ENV_MAP: dict[str, tuple[str, type]] = {
     "KUBE_Q_STREAM":                 ("stream",                 bool),
     "KUBE_Q_OUTPUT":                 ("output",                 str),
     "KUBE_Q_LOG_LEVEL":              ("log_level",              str),
+    "KUBE_Q_MODEL":                  ("model",                  str),
     "KUBE_Q_USER_NAME":              ("user_name",              str),
     "KUBE_Q_AGENT_NAME":             ("agent_name",             str),
+    "KUBE_Q_COST_PER_1K_PROMPT":     ("cost_per_1k_prompt",     float),
+    "KUBE_Q_COST_PER_1K_COMPLETION": ("cost_per_1k_completion", float),
 }
 
 
