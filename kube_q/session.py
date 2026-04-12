@@ -387,9 +387,8 @@ def run_repl(
         if state.hitl_pending:
             prompt = FormattedText([("bold fg:ansiyellow", "HITL> ")])
         elif state.current_namespace:
-            ns = state.current_namespace
             prompt = FormattedText(
-                [("bold fg:ansigreen", f"{user_name} [{ns}]: ")]
+                [("bold fg:ansigreen", f"{user_name} [{state.current_namespace}]: ")]
             )
         else:
             prompt = FormattedText([("bold fg:ansigreen", f"{user_name}: ")])
@@ -443,9 +442,9 @@ def run_repl(
             )
             tok = store.get_session_tokens(state.conversation_id)
             last_u = store.get_last_usage(state.conversation_id)
-            model = last_u.get("model") if last_u else None
+            last_model = last_u.get("model") if last_u else None
             cost = costs.estimate_cost(
-                model,
+                last_model,
                 tok["total_prompt_tokens"],
                 tok["total_completion_tokens"],
                 cost_prompt_override,
