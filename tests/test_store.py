@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-import kube_q.store as store_mod
-from kube_q.store import (
+import kube_q.cli.store as store_mod
+from kube_q.cli.store import (
     append_message,
     branch_session,
     delete_session,

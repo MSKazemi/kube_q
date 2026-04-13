@@ -12,17 +12,16 @@ from unittest.mock import patch
 import httpx
 import respx
 
-from kube_q.transport import (
-    _build_payload,
-    _describe_error,
-    _iter_sse,
-    _render_error_event,
-    _render_tool_call,
-    _request_headers,
+from kube_q.cli.renderer import render_error_event as _render_error_event
+from kube_q.cli.renderer import render_tool_call as _render_tool_call
+from kube_q.core.transport import (
+    build_payload as _build_payload,
+    describe_error as _describe_error,
+    iter_sse as _iter_sse,
+    build_headers as _request_headers,
     check_health,
-    non_stream_query,
-    stream_query,
 )
+from kube_q.transport import non_stream_query, stream_query
 
 # ── _describe_error ────────────────────────────────────────────────────────────
 
@@ -611,7 +610,7 @@ def test_stream_query_mixed_ki_and_openai_events() -> None:
 
 
 def test_render_tool_call_tool_and_message() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_tool_call({"tool": "k8s.get_pods", "message": "Fetching pods"})
     mock_console.print.assert_called_once()
     call_arg = mock_console.print.call_args[0][0]
@@ -620,34 +619,34 @@ def test_render_tool_call_tool_and_message() -> None:
 
 
 def test_render_tool_call_tool_only() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_tool_call({"tool": "k8s.describe_node"})
     mock_console.print.assert_called_once()
     assert "k8s.describe_node" in mock_console.print.call_args[0][0]
 
 
 def test_render_tool_call_message_only() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_tool_call({"message": "doing something"})
     mock_console.print.assert_called_once()
     assert "doing something" in mock_console.print.call_args[0][0]
 
 
 def test_render_tool_call_empty_is_silent() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_tool_call({})
     mock_console.print.assert_not_called()
 
 
 def test_render_error_event_prints_message() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_error_event({"message": "something broke"})
     mock_console.print.assert_called_once()
     assert "something broke" in mock_console.print.call_args[0][0]
 
 
 def test_render_error_event_fallback_to_str() -> None:
-    with patch("kube_q.transport.console") as mock_console:
+    with patch("kube_q.cli.renderer.console") as mock_console:
         _render_error_event({"code": 500})  # no "message" key
     mock_console.print.assert_called_once()
     assert "500" in mock_console.print.call_args[0][0]

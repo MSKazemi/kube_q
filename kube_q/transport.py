@@ -1,12 +1,15 @@
 """
 cli_transport.py — HTTP communication: SSE streaming, non-streaming query, health check.
+
+Rendering-free primitives live in kube_q.core.transport.
+This module adds the Rich Live rendering layer on top.
 """
 
 import json
 import logging
 import time
 import uuid
-from typing import Any
+from typing import Callable
 
 import httpx
 from rich.live import Live
@@ -14,160 +17,35 @@ from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.text import Text
 
-from kube_q.render import _plain_output, console, print_response
-
-# ── Retry config ───────────────────────────────────────────────────────────────
-_QUERY_RETRY_DELAYS = (2, 5, 10)  # seconds between attempts (3 total)
-
-# ── DNS error keywords ─────────────────────────────────────────────────────────
-_DNS_KEYWORDS = ("Name or service not known", "nodename nor servname", "getaddrinfo")
+from kube_q.cli.renderer import (
+    _plain_output,
+    console,
+    print_response,
+    render_error_event,
+    render_status,
+    render_tool_call,
+)
+from kube_q.core.transport import (
+    QUERY_RETRY_DELAYS,
+    build_headers,
+    build_payload,
+    describe_error,
+    iter_sse,
+    make_client,
+    set_debug,
+)
+from kube_q.core.transport import check_health  # noqa: F401 (re-export for callers)
 
 # ── Module logger ──────────────────────────────────────────────────────────────
 _logger = logging.getLogger(__name__)
 
-# ── Debug mode (set by main via set_debug) ────────────────────────────────────
-_debug: bool = False
-
-
-def set_debug(enabled: bool) -> None:
-    """Enable/disable debug HTTP logging (raw request/response to stderr + log file)."""
-    global _debug
-    _debug = enabled
-
-
-# ── Error helpers ──────────────────────────────────────────────────────────────
-
-def _describe_error(url: str, exc: Exception) -> str:
-    """Return a human-readable reason for a connection failure."""
-    if isinstance(exc, httpx.ConnectError):
-        msg = str(exc)
-        if any(k in msg for k in _DNS_KEYWORDS):
-            host = url.split("//")[-1].split("/")[0]
-            return f"DNS resolution failed for '{host}'"
-        return f"Connection refused — nothing is listening at {url}"
-    if isinstance(exc, httpx.TimeoutException):
-        return "Request timed out — API did not respond in time"
-    if isinstance(exc, httpx.ProxyError):
-        return f"Proxy error: {exc}"
-    if isinstance(exc, httpx.RemoteProtocolError):
-        return f"Server closed the connection unexpectedly: {exc}"
-    if isinstance(exc, httpx.NetworkError):
-        return f"Network error: {exc}"
-    return f"Unexpected error: {exc}"
-
-
-# ── Debug event hooks ─────────────────────────────────────────────────────────
-
-def _hook_request(request: httpx.Request) -> None:
-    safe_headers = {k: v for k, v in request.headers.items() if k.lower() != "authorization"}
-    body = request.content.decode("utf-8", errors="replace")
-    _logger.debug("→ %s %s  headers=%s", request.method, request.url, safe_headers)
-    if body:
-        _logger.debug("  body=%s", body[:4000])
-
-
-def _hook_response(response: httpx.Response) -> None:
-    _logger.debug("← %d %s", response.status_code, response.url)
-
-
-# ── Shared request builders ────────────────────────────────────────────────────
-
-def _make_client(ca_cert: str | None, timeout: float = 120.0) -> httpx.Client:
-    hooks: dict = {"request": [_hook_request], "response": [_hook_response]} if _debug else {}
-    return httpx.Client(timeout=timeout, verify=ca_cert if ca_cert else True, event_hooks=hooks)
-
-
-def _request_headers(
-    api_key: str | None,
-    session_id: str,
-    request_id: str,
-    *,
-    accept: str | None = None,
-) -> dict[str, str]:
-    headers: dict[str, str] = {
-        "X-Session-ID": session_id,
-        "X-Request-ID": request_id,
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    if accept:
-        headers["Accept"] = accept
-    return headers
-
-
-def _build_payload(
-    messages: list[dict],
-    user: str,
-    stream: bool,
-    model: str = "kubeintellect-v2",
-) -> dict:
-    payload: dict = {
-        "model": model,
-        "messages": [messages[-1]],
-        "stream": stream,
-        "user": user,
-    }
-    if stream:
-        # Request a usage event at the end of the SSE stream.
-        # OpenAI-compatible servers require this; unknown servers ignore it.
-        payload["stream_options"] = {"include_usage": True}
-    return payload
-
-
-# ── Side-channel event renderers ──────────────────────────────────────────────
-
-def _render_status(event: dict, live: Live, first_token: bool) -> None:
-    """Render a ``status`` side-channel event.
-
-    While the spinner is still visible (no tokens yet), replace the spinner
-    text with the new status message.  After the first token has arrived the
-    spinner is gone, so fall back to printing a dim ephemeral line above the
-    live markdown area.
-    """
-    msg = event.get("message") or event.get("phase") or ""
-    if not msg:
-        return
-    if first_token:
-        live.update(Spinner("dots", text=Text.assemble((" ", ""), (msg, "dim cyan"))))
-    else:
-        console.print(f"[dim]⚙ {msg}[/dim]")
-
-
-def _render_tool_call(event: dict) -> None:
-    """Render a ``tool_call`` side-channel event above the live area."""
-    tool = event.get("tool", "")
-    msg = event.get("message", "")
-    if tool and msg:
-        console.print(f"[dim cyan]⚙ {tool}[/dim cyan][dim] → {msg}[/dim]")
-    elif tool:
-        console.print(f"[dim cyan]⚙ {tool}[/dim cyan]")
-    elif msg:
-        console.print(f"[dim]⚙ {msg}[/dim]")
-
-
-def _render_error_event(event: dict) -> None:
-    """Render an ``error`` side-channel event."""
-    console.print(f"[red]✗ {event.get('message', str(event))}[/red]")
-
-
-# ── SSE helpers ────────────────────────────────────────────────────────────────
-
-def _iter_sse(response: httpx.Response) -> Any:
-    """Yield parsed SSE data objects. Handles multi-line data and [DONE] sentinel."""
-    buffer = ""
-    for raw_chunk in response.iter_text():
-        buffer += raw_chunk
-        while "\n\n" in buffer:
-            block, buffer = buffer.split("\n\n", 1)
-            for line in block.splitlines():
-                if line.startswith("data:"):
-                    payload = line[len("data:"):].strip()
-                    if payload == "[DONE]":
-                        return
-                    try:
-                        yield json.loads(payload)
-                    except json.JSONDecodeError:
-                        pass
+# ── Legacy aliases kept for callers that import from kube_q.transport ─────────
+_QUERY_RETRY_DELAYS = QUERY_RETRY_DELAYS
+_make_client = make_client
+_build_payload = build_payload
+_request_headers = build_headers
+_describe_error = describe_error
+_iter_sse = iter_sse
 
 
 def _stream_once(
@@ -175,11 +53,14 @@ def _stream_once(
     payload: dict,
     headers: dict,
     client: httpx.Client,
+    on_status: Callable[[dict, Live, bool], None] = render_status,
+    on_tool_call: Callable[[dict], None] = render_tool_call,
+    on_error: Callable[[dict], None] = render_error_event,
 ) -> tuple[str, bool, str | None, dict | None]:
     """One streaming attempt. Raises httpx.TransportError on connection failure.
 
     Returns (full_text, hitl_pending, action_id, usage_dict).
-    usage_dict is the raw "usage" block from the final SSE event, or None.
+    Rendering callbacks are injected so core transport logic has no Rich deps.
     """
     full_text = ""
     hitl_pending = False
@@ -211,24 +92,22 @@ def _stream_once(
                 return "", False, None, None
 
             first_token = True
-            for event in _iter_sse(resp):
+            for event in iter_sse(resp):
                 _logger.debug("sse event: %s", event)
 
-                # ── Side-channel ki_event (nested under "ki_event" key) ───────
+                # ── Side-channel ki_event ────────────────────────────────────
                 ki = event.get("ki_event")
                 if ki:
                     kind = ki.get("type")
                     if kind == "status":
-                        _render_status(ki, live, first_token)
+                        on_status(ki, live, first_token)
                     elif kind == "tool_call":
-                        _render_tool_call(ki)
+                        on_tool_call(ki)
                     elif kind == "error":
-                        _render_error_event(ki)
+                        on_error(ki)
                     elif kind == "usage":
-                        # Server sends usage data inside a ki_event
                         last_usage = ki
                         _logger.debug("usage captured from ki_event: %s", ki)
-                    # Also check for a nested "usage" key inside ki_event
                     if "usage" in ki:
                         last_usage = ki["usage"]
                         _logger.debug("usage captured from ki_event.usage: %s", last_usage)
@@ -246,7 +125,6 @@ def _stream_once(
                 finish = choice.get("finish_reason")
                 if content:
                     if first_token:
-                        # Spinner disappears; switch to persistent live rendering
                         live.transient = False
                         first_token = False
                     full_text += content
@@ -269,7 +147,6 @@ def _stream_once(
             "server may not support stream_options.include_usage"
         )
     if full_text:
-        # Content already rendered live above; print elapsed footer
         total_tokens = last_usage.get("total_tokens") if last_usage else None
         token_str = f" · {total_tokens:,} tokens" if total_tokens else ""
         console.print(f"[bold cyan]kube-q[/bold cyan]  [dim]({elapsed:.1f}s{token_str})[/dim]")
@@ -298,22 +175,22 @@ def stream_query(
         "stream_query session=%s user=%s request=%s url=%s",
         session_id, user, request_id, url,
     )
-    payload = _build_payload(messages, user, True, model)
-    headers = _request_headers(api_key, session_id, request_id, accept="text/event-stream")
+    payload = build_payload(messages, user, True, model)
+    headers = build_headers(api_key, session_id, request_id, accept="text/event-stream")
 
-    with _make_client(ca_cert, timeout=timeout) as client:
-        for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
+    with make_client(ca_cert, timeout=timeout) as client:
+        for attempt in range(len(QUERY_RETRY_DELAYS) + 1):
             if attempt > 0:
-                delay = _QUERY_RETRY_DELAYS[attempt - 1]
+                delay = QUERY_RETRY_DELAYS[attempt - 1]
                 console.print(
                     f"[dim]  Retrying in {delay}s… "
-                    f"(attempt {attempt}/{len(_QUERY_RETRY_DELAYS)})[/dim]"
+                    f"(attempt {attempt}/{len(QUERY_RETRY_DELAYS)})[/dim]"
                 )
                 time.sleep(delay)
             try:
                 return _stream_once(url, payload, headers, client)
             except httpx.TransportError as exc:
-                reason = _describe_error(url, exc)
+                reason = describe_error(url, exc)
                 if attempt == 0:
                     console.print(f"\n[red]Disconnected:[/red] {reason}")
                 else:
@@ -348,16 +225,16 @@ def non_stream_query(
         "non_stream_query session=%s user=%s request=%s url=%s",
         session_id, user, request_id, url,
     )
-    payload = _build_payload(messages, user, False, model)
-    headers = _request_headers(api_key, session_id, request_id)
+    payload = build_payload(messages, user, False, model)
+    headers = build_headers(api_key, session_id, request_id)
 
-    with _make_client(ca_cert, timeout=timeout) as client:
-        for attempt in range(len(_QUERY_RETRY_DELAYS) + 1):
+    with make_client(ca_cert, timeout=timeout) as client:
+        for attempt in range(len(QUERY_RETRY_DELAYS) + 1):
             if attempt > 0:
-                delay = _QUERY_RETRY_DELAYS[attempt - 1]
+                delay = QUERY_RETRY_DELAYS[attempt - 1]
                 console.print(
                     f"[dim]  Retrying in {delay}s… "
-                    f"(attempt {attempt}/{len(_QUERY_RETRY_DELAYS)})[/dim]"
+                    f"(attempt {attempt}/{len(QUERY_RETRY_DELAYS)})[/dim]"
                 )
                 time.sleep(delay)
             try:
@@ -416,7 +293,7 @@ def non_stream_query(
                 return text, hitl_pending, action_id, usage
 
             except httpx.TransportError as exc:
-                reason = _describe_error(url, exc)
+                reason = describe_error(url, exc)
                 if attempt == 0:
                     console.print(f"\n[red]Disconnected:[/red] {reason}")
                 else:
@@ -427,37 +304,3 @@ def non_stream_query(
         "[dim]Check your connection and API URL, then try again.[/dim]"
     )
     return "", False, None, None
-
-
-# ── Health check ──────────────────────────────────────────────────────────────
-
-def check_health(
-    url: str,
-    *,
-    api_key: str | None = None,
-    ca_cert: str | None = None,
-    timeout: float = 5.0,
-) -> tuple[bool, str]:
-    """Check API reachability. Returns (ok, reason)."""
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    _logger.debug("check_health url=%s", url)
-    try:
-        with _make_client(ca_cert, timeout=timeout) as client:
-            r = client.get(f"{url}/healthz", headers=headers)
-        if r.status_code == 200:
-            return True, ""
-        if r.status_code == 401:
-            return False, "Authentication required — set KUBE_Q_API_KEY or pass --api-key"
-        return False, f"HTTP {r.status_code} from {url}/healthz"
-    except httpx.ConnectError as e:
-        msg = str(e)
-        if any(k in msg for k in _DNS_KEYWORDS):
-            host = url.split("//")[-1].split("/")[0]
-            return False, f"DNS resolution failed for '{host}' — check the hostname or /etc/hosts"
-        return False, f"Connection refused — nothing is listening at {url}"
-    except httpx.TimeoutException:
-        return False, f"Connection timed out — {url} did not respond within 5 s"
-    except Exception as e:
-        return False, f"Unexpected error: {e}"

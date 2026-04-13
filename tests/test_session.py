@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from kube_q.session import _load_or_create_user_id, _resolve_attachments
+from kube_q.core.session import load_or_create_user_id as _load_or_create_user_id
+from kube_q.core.session import resolve_attachments as _resolve_attachments
 
 # ── _resolve_attachments ──────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ def test_resolve_attachments_not_a_file(tmp_path: Path) -> None:
 
 def test_load_or_create_user_id_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     id_file = tmp_path / "kube_q_id"
-    monkeypatch.setattr("kube_q.session._USER_ID_FILE", str(id_file))
+    monkeypatch.setattr("kube_q.core.session._USER_ID_FILE", str(id_file))
     uid = _load_or_create_user_id("my-explicit-id")
     assert uid == "my-explicit-id"
     assert id_file.read_text() == "my-explicit-id"
@@ -107,7 +108,7 @@ def test_load_or_create_user_id_explicit(tmp_path: Path, monkeypatch: pytest.Mon
 def test_load_or_create_user_id_from_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     id_file = tmp_path / "kube_q_id"
     id_file.write_text("saved-user-id")
-    monkeypatch.setattr("kube_q.session._USER_ID_FILE", str(id_file))
+    monkeypatch.setattr("kube_q.core.session._USER_ID_FILE", str(id_file))
     uid = _load_or_create_user_id()
     assert uid == "saved-user-id"
 
@@ -116,7 +117,7 @@ def test_load_or_create_user_id_generates_new(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     id_file = tmp_path / "kube_q_id"
-    monkeypatch.setattr("kube_q.session._USER_ID_FILE", str(id_file))
+    monkeypatch.setattr("kube_q.core.session._USER_ID_FILE", str(id_file))
     uid = _load_or_create_user_id()
     assert uid.startswith("cli-user-")
     assert id_file.exists()
@@ -128,7 +129,7 @@ def test_load_or_create_user_id_empty_file(
 ) -> None:
     id_file = tmp_path / "kube_q_id"
     id_file.write_text("   ")  # whitespace only — treated as empty
-    monkeypatch.setattr("kube_q.session._USER_ID_FILE", str(id_file))
+    monkeypatch.setattr("kube_q.core.session._USER_ID_FILE", str(id_file))
     uid = _load_or_create_user_id()
     # Should generate a new ID rather than returning whitespace
     assert uid.startswith("cli-user-")

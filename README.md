@@ -21,6 +21,7 @@
 - **Single-query mode** — pipe-friendly with `kq --query "…"` and `--output plain`
 - **TLS & auth** — `--api-key` / `KUBE_Q_API_KEY` env var, custom CA cert via `--ca-cert`
 - **Rich output** — syntax-highlighted code blocks, elapsed response time, typo suggestions for slash commands
+- **Python SDK** — use `KubeQClient` directly in your own scripts and tools
 
 ---
 
@@ -30,11 +31,18 @@
 pip install kube-q
 ```
 
+Or via Homebrew:
+
+```bash
+brew tap MSKazemi/kube-q
+brew install kube-q
+```
+
 Or install from source:
 
 ```bash
-git clone https://github.com/your-org/kube-q
-cd kube-q
+git clone https://github.com/MSKazemi/kube_q
+cd kube_q
 pip install -e .
 ```
 
@@ -321,6 +329,71 @@ HITL> /approve
 ```
 
 The prompt changes to `HITL>` while an action is pending. Type `/approve` to execute it or `/deny` to cancel.
+
+---
+
+## Python SDK
+
+`kube_q.core` exposes a typed SDK you can use directly in scripts, notebooks, or other tools — no CLI required.
+
+```python
+from kube_q.core.client import KubeQClient
+from kube_q.core.events import TokenEvent, FinalEvent
+
+client = KubeQClient(url="http://localhost:8000", api_key="...")
+
+# Non-streaming query
+result = client.query("why are my pods failing?")
+print(result["text"])
+
+# Streaming — typed event objects
+for event in client.stream("list all deployments in default namespace"):
+    match event:
+        case TokenEvent(data=d):
+            print(d.content, end="", flush=True)
+        case FinalEvent():
+            break
+```
+
+All backend events are modelled as a typed Pydantic discriminated union in `kube_q.core.events`:
+
+| Event type | Data fields |
+| --- | --- |
+| `token` | `content`, `role` |
+| `status` | `phase`, `message` |
+| `tool_call` | `tool_name`, `args`, `call_id`, `dry_run` |
+| `tool_result` | `call_id`, `ok`, `summary`, `truncated` |
+| `hitl_request` | `action`, `risk`, `diff`, `approval_id` |
+| `usage` | `prompt_tokens`, `completion_tokens`, `total_tokens`, `model` |
+| `final` | `content`, `usage`, `elapsed_ms` |
+| `error` | `code`, `message`, `retryable` |
+
+---
+
+## Web frontend
+
+The `web/` directory contains a Next.js web UI for kube-q.
+
+### Browser chat
+
+Three-pane desktop layout (resizable panels):
+- **Chat panel** — streaming markdown responses with `react-markdown` + syntax highlighting
+- **Reasoning timeline** — live status, tool calls, and tool results as they happen
+- **Terminal panel** — xterm.js view of tool execution output
+
+Tabbed mobile layout, dark mode, and bearer-token auth gate included.
+
+### PTY terminal (full CLI in the browser)
+
+The `/pty` route spawns `kq` in a pseudo-terminal via WebSocket. It's a pure byte relay — the Python CLI handles all logic; xterm.js renders it.
+
+```bash
+cd web
+npm install
+npm run dev:pty     # starts Next.js + pty-server on separate ports
+```
+
+Open `http://localhost:3000/pty` to get a full terminal running your local `kq` binary in the browser.
 
 ---
 

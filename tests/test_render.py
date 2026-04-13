@@ -9,8 +9,8 @@ import sys
 
 import pytest
 
-import kube_q.render as render_mod
-from kube_q.render import _should_use_pager, c, set_output_plain
+import kube_q.cli.renderer as render_mod
+from kube_q.cli.renderer import _should_use_pager, c, set_output_plain
 
 # ── set_output_plain ──────────────────────────────────────────────────────────
 
