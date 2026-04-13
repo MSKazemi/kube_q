@@ -92,7 +92,8 @@ from kube_q.cli.store import list_sessions as _list_sessions
 from kube_q.cli.store import search_sessions as _search_sessions
 from kube_q.core.config import load_config, setup_logging
 from kube_q.core.session import load_or_create_user_id as _load_or_create_user_id
-from kube_q.transport import non_stream_query, set_debug, stream_query
+from kube_q.core.transport import set_debug
+from kube_q.transport import non_stream_query, stream_query
 
 try:
     __version__ = _pkg_version("kube-q")

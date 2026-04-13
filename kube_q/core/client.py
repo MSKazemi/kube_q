@@ -403,7 +403,7 @@ def _parse_sse_chunk(raw: dict) -> Event | None:
     return None
 
 
-async def _aiter_sse(response: httpx.Response):  # type: ignore[return]
+async def _aiter_sse(response: httpx.Response) -> AsyncIterator[dict]:  # type: ignore[return]
     """Async SSE parser — mirrors iter_sse but for httpx async streaming."""
     import json
 
