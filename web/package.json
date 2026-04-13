@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n next,pty -c cyan,yellow \"next dev\" \"node pty-server.mjs\"",
+    "dev": "concurrently -n next,pty -c cyan,yellow \"NEXT_PUBLIC_PTY_PORT=3001 next dev\" \"node pty-server.mjs\"",
     "build": "next build",
     "start": "node server.mjs",
     "lint": "eslint"
