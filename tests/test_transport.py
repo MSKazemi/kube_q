@@ -15,11 +15,19 @@ import respx
 from kube_q.cli.renderer import render_error_event as _render_error_event
 from kube_q.cli.renderer import render_tool_call as _render_tool_call
 from kube_q.core.transport import (
-    build_payload as _build_payload,
-    describe_error as _describe_error,
-    iter_sse as _iter_sse,
     build_headers as _request_headers,
+)
+from kube_q.core.transport import (
+    build_payload as _build_payload,
+)
+from kube_q.core.transport import (
     check_health,
+)
+from kube_q.core.transport import (
+    describe_error as _describe_error,
+)
+from kube_q.core.transport import (
+    iter_sse as _iter_sse,
 )
 from kube_q.transport import non_stream_query, stream_query
 

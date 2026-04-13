@@ -8,18 +8,17 @@ Uses respx to mock the HTTP layer without hitting a real server.
 import json
 from unittest.mock import patch
 
+import httpx
 import pytest
 import respx
-import httpx
 
 from kube_q.core.client import KubeQClient
 from kube_q.core.events import (
+    FinalEvent,
     StatusEvent,
     TokenEvent,
     ToolCallEvent,
     ToolResultEvent,
-    FinalEvent,
-    ErrorEvent,
     UsageEvent,
 )
 
@@ -68,7 +67,9 @@ def test_stream_ki_event_sequence(client: KubeQClient) -> None:
     chunks = [
         {"ki_event": {"type": "status", "data": {"message": "Routing..."}}},
         {"ki_event": {"type": "tool_call", "data": {"tool_name": "k8s.get_pods", "call_id": "c1"}}},
-        {"ki_event": {"type": "tool_result", "data": {"call_id": "c1", "ok": True, "summary": "3 pods"}}},
+        {"ki_event": {"type": "tool_result", "data": {
+            "call_id": "c1", "ok": True, "summary": "3 pods",
+        }}},
         {"choices": [{"delta": {"content": "Found 3 pods."}, "finish_reason": None}]},
         {"ki_event": {"type": "final", "data": {"content": "Done", "elapsed_ms": 1200}}},
         {"choices": [{"delta": {}, "finish_reason": "stop"}]},

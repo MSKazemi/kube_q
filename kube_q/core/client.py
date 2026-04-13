@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
 
@@ -118,7 +118,6 @@ class KubeQClient:
         payload = build_payload(messages, user, False, self.model)
         headers = build_headers(self.api_key, sid, request_id)
 
-        import json
 
         import httpx
 

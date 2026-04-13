@@ -14,9 +14,9 @@ v2 → v3  FTS5 full-text search index + branch columns on sessions.
 
 import logging
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Generator
 
 from kube_q.core.config import CONFIG_DIR
 
@@ -187,7 +187,8 @@ def upsert_session(session_id: str, user: str, namespace: str | None) -> None:
         with _db() as conn:
             now = _now()
             conn.execute(
-                "INSERT OR IGNORE INTO sessions (session_id, user, created_at, updated_at, namespace) "
+                "INSERT OR IGNORE INTO sessions "
+                "(session_id, user, created_at, updated_at, namespace) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (session_id, user, now, now, namespace),
             )
@@ -405,7 +406,8 @@ def search_sessions(query: str, limit: int = 20) -> list[dict]:
             rows = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.updated_at,
-                       (SELECT COUNT(*) FROM messages WHERE session_id = s.session_id) AS message_count,
+                       (SELECT COUNT(*) FROM messages
+                        WHERE session_id = s.session_id) AS message_count,
                        snippet(messages_fts, 0, '>>>', '<<<', '...', 40) AS snippet,
                        messages_fts.rank AS rank
                 FROM messages_fts

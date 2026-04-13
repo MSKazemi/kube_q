@@ -81,13 +81,17 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from urllib.parse import urlparse
 
-from kube_q import store
-from kube_q.cli.renderer import console, format_search_results, set_output_plain
+from kube_q.cli.renderer import (
+    _print_sessions_table,
+    console,
+    format_search_results,
+    set_output_plain,
+)
 from kube_q.cli.repl import ReplConfig, run_repl
+from kube_q.cli.store import list_sessions as _list_sessions
+from kube_q.cli.store import search_sessions as _search_sessions
 from kube_q.core.config import load_config, setup_logging
 from kube_q.core.session import load_or_create_user_id as _load_or_create_user_id
-from kube_q.cli.store import list_sessions as _list_sessions, search_sessions as _search_sessions
-from kube_q.cli.renderer import _print_sessions_table
 from kube_q.transport import non_stream_query, set_debug, stream_query
 
 try:

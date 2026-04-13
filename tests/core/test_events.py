@@ -5,7 +5,6 @@ Covers: parse_event for all 8 types, legacy ki_event format (no "data" wrapper),
         unknown types return None, and field defaults.
 """
 
-import pytest
 
 from kube_q.core.events import (
     ErrorEvent,
@@ -18,7 +17,6 @@ from kube_q.core.events import (
     UsageEvent,
     parse_event,
 )
-
 
 # ── StatusEvent ───────────────────────────────────────────────────────────────
 

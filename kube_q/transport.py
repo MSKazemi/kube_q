@@ -9,7 +9,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 import httpx
 from rich.live import Live
@@ -29,12 +29,11 @@ from kube_q.core.transport import (
     QUERY_RETRY_DELAYS,
     build_headers,
     build_payload,
+    check_health,  # noqa: F401 (re-export for callers)
     describe_error,
     iter_sse,
     make_client,
-    set_debug,
 )
-from kube_q.core.transport import check_health  # noqa: F401 (re-export for callers)
 
 # ── Module logger ──────────────────────────────────────────────────────────────
 _logger = logging.getLogger(__name__)

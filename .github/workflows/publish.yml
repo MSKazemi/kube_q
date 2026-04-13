@@ -9,6 +9,9 @@ permissions:
   contents: read
   id-token: write  # REQUIRED for trusted publishing
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test-before-publish:
     name: Run tests before publishing

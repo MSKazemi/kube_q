@@ -33,7 +33,11 @@ from kube_q.cli.renderer import (
 from kube_q.core.config import CONFIG_DIR
 from kube_q.core.session import (
     SessionState,
+)
+from kube_q.core.session import (
     load_or_create_user_id as _load_or_create_user_id,
+)
+from kube_q.core.session import (
     resolve_attachments as _resolve_attachments,
 )
 from kube_q.core.transport import fetch_namespaces
