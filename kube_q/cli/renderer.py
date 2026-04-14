@@ -36,22 +36,52 @@ def c(text: str, *codes: str) -> str:
 
 # ── Logo ──────────────────────────────────────────────────────────────────────
 
-_LOGO_ART = (
-    "\033[1;36m  _          _               \033[0m\n"
-    "\033[1;36m | | ___   _| |__   ___      \033[0m\n"
-    "\033[1;36m | |/ / | | | '_ \\ / _ \\  ─ q\033[0m\n"
-    "\033[1;36m |   <| |_| | |_) |  __/    \033[0m\n"
-    "\033[1;36m |_|\\_\\\\__,_|_.__/ \\___|    \033[0m\n"
-    "\033[2m   Your AI co-pilot for Kubernetes.\033[0m"
+_DEFAULT_LOGO_ART = (
+    "\033[1;36m    __ __      __         ____      __       ____          __ \033[0m\n"
+    "\033[1;36m   / //_/_  __/ /_  ___  /  _/___  / /____  / / /__  _____/ /_\033[0m\n"
+    "\033[1;36m  / ,< / / / / __ \\/ _ \\ / // __ \\/ __/ _ \\/ / / _ \\/ ___/ __/\033[0m\n"
+    "\033[1;36m / /| / /_/ / /_/ /  __// // / / / /_/  __/ / /  __/ /__/ /_  \033[0m\n"
+    "\033[1;36m/_/ |_\\__,_/_.___/\\___/___/_/ /_/\\__/\\___/_/_/\\___/\\___/\\__/  \033[0m"
 )
+_DEFAULT_TAGLINE = "Your AI co-pilot for Kubernetes."
+
+# Small watermark shown below a custom logo when KUBE_Q_LOGO is set.
+_KUBE_Q_WATERMARK = "\033[2m  powered by kube-q\033[0m"
+
+_custom_logo: str | None = None
+_custom_tagline: str | None = None
+
+
+def set_custom_logo(text: str | None) -> None:
+    """Set a custom logo block (replaces the ASCII art).  Use \\n for newlines."""
+    global _custom_logo
+    _custom_logo = text.replace("\\n", "\n") if text else None
+
+
+def set_custom_tagline(text: str | None) -> None:
+    """Set a custom tagline / copyright line."""
+    global _custom_tagline
+    _custom_tagline = text
 
 
 def _print_logo(connected: bool = True) -> None:
-    if sys.stdout.isatty():
-        art = _LOGO_ART if connected else _LOGO_ART.replace("\033[1;36m", "\033[1;31m")
-        print()
+    if not sys.stdout.isatty():
+        return
+    print()
+    if _custom_logo:
+        # Big custom logo + small kube-q watermark
+        print(_custom_logo)
+        tagline = _custom_tagline or _DEFAULT_TAGLINE
+        print(f"\033[2m  {tagline}\033[0m")
+        print(_KUBE_Q_WATERMARK)
+    else:
+        # Default kube-q ASCII art
+        colour = "\033[1;36m" if connected else "\033[1;31m"
+        art = _DEFAULT_LOGO_ART.replace("\033[1;36m", colour)
+        tagline = _custom_tagline or _DEFAULT_TAGLINE
         print(art)
-        print()
+        print(f"\033[2m   {tagline}\033[0m")
+    print()
 
 
 # ── Output format ─────────────────────────────────────────────────────────────

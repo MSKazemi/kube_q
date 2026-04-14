@@ -11,7 +11,7 @@
  * Requires the custom Next.js server:  npm run dev:pty
  */
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 // Dev: set NEXT_PUBLIC_PTY_PORT=3001 (separate pty-server.mjs port).
 // Production: leave unset → connect to /pty-ws on the same origin (server.mjs).
@@ -31,15 +31,51 @@ function ptyWsUrl(cols: number, rows: number): string {
   return `${proto}//${window.location.host}/pty-ws${qs}`;
 }
 
-export default function PtyTerminal() {
+export interface PtyTerminalHandle {
+  downloadBuffer(): void;
+}
+
+const PtyTerminal = forwardRef<PtyTerminalHandle>((_, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    downloadBuffer() {
+      const term = termRef.current;
+      if (!term) return;
+
+      const buf = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buf.length; i++) {
+        const line = buf.getLine(i);
+        lines.push(line ? line.translateToString(true) : "");
+      }
+
+      // Trim leading/trailing blank lines
+      let start = 0;
+      while (start < lines.length && lines[start].trim() === "") start++;
+      let end = lines.length - 1;
+      while (end > start && lines[end].trim() === "") end--;
+      const body = lines.slice(start, end + 1).join("\n");
+
+      const ts = new Date().toISOString();
+      const md = `# kube-q Session\n\n*Downloaded: ${ts}*\n\n\`\`\`\n${body}\n\`\`\`\n`;
+
+      const blob = new Blob([md], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `kube-q-${ts.replace(/[:.]/g, "-")}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  }));
 
   useEffect(() => {
     if (!containerRef.current) return;
     const el = containerRef.current;
     let destroyed = false;
     let ws: WebSocket | null = null;
-    let termInstance: import("@xterm/xterm").Terminal | null = null;
 
     async function init() {
       const { Terminal } = await import("@xterm/xterm");
@@ -68,7 +104,7 @@ export default function PtyTerminal() {
       fit.fit();
       requestAnimationFrame(() => { if (!destroyed) fit.fit(); });
 
-      termInstance = term;
+      termRef.current = term;
 
       const ro = new ResizeObserver(() => {
         fit.fit();
@@ -138,7 +174,8 @@ export default function PtyTerminal() {
     return () => {
       destroyed = true;
       ws?.close();
-      termInstance?.dispose();
+      termRef.current?.dispose();
+      termRef.current = null;
       if (cleanup) cleanup.ro.disconnect();
     };
   }, []);
@@ -150,4 +187,8 @@ export default function PtyTerminal() {
       style={{ padding: "4px" }}
     />
   );
-}
+});
+
+PtyTerminal.displayName = "PtyTerminal";
+
+export default PtyTerminal;

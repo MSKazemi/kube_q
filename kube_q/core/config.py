@@ -47,6 +47,10 @@ class Config:
     user_name:  str = "You"
     agent_name: str = "kube-q"
 
+    # Banner customisation
+    logo:    str | None = None   # big logo shown at top of banner (use \n for newlines)
+    tagline: str | None = None   # subtitle / copyright line, e.g. "© 2025 Acme Corp"
+
     # Cost estimation overrides (USD per 1K tokens)
     cost_per_1k_prompt:      float | None = None
     cost_per_1k_completion:  float | None = None
@@ -72,6 +76,8 @@ _ENV_MAP: dict[str, tuple[str, type]] = {
     "KUBE_Q_AGENT_NAME":             ("agent_name",             str),
     "KUBE_Q_COST_PER_1K_PROMPT":     ("cost_per_1k_prompt",     float),
     "KUBE_Q_COST_PER_1K_COMPLETION": ("cost_per_1k_completion", float),
+    "KUBE_Q_LOGO":                   ("logo",                   str),
+    "KUBE_Q_TAGLINE":                ("tagline",                str),
 }
 
 

@@ -40,6 +40,8 @@ Config (~/.kube-q/.env or ./.env):
   KUBE_Q_AGENT_NAME=kube-q
   KUBE_Q_COST_PER_1K_PROMPT=0.003      # override cost rate for /tokens
   KUBE_Q_COST_PER_1K_COMPLETION=0.006  # override cost rate for /tokens
+  KUBE_Q_LOGO=KubeIntellect            # custom banner logo (use \\n for newlines)
+  KUBE_Q_TAGLINE=© 2025 Acme Corp     # custom tagline / copyright line
 
 In-REPL commands:
   /new           — start a new conversation (new conversation ID)
@@ -85,6 +87,8 @@ from kube_q.cli.renderer import (
     _print_sessions_table,
     console,
     format_search_results,
+    set_custom_logo,
+    set_custom_tagline,
     set_output_plain,
 )
 from kube_q.cli.repl import ReplConfig, run_repl
@@ -278,6 +282,10 @@ def main() -> None:
 
     if args.output == "plain":
         set_output_plain(True)
+
+    # Apply banner customisation from config
+    set_custom_logo(cfg.logo)
+    set_custom_tagline(cfg.tagline)
 
     # Warn on plain-HTTP connections to non-local hosts
     parsed_url = urlparse(args.url)
