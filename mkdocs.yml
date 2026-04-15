@@ -62,6 +62,7 @@ nav:
       - Token Tracking: token-tracking.md
       - Human-in-the-Loop: hitl.md
   - Web UI: web-ui.md
+  - Deployment & Hosting: deployment.md
   - Python SDK: sdk.md
   - Changelog: changelog.md
 
