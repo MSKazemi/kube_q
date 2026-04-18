@@ -6,6 +6,15 @@ Usage:
   kq                          # interactive REPL
   kq --query "get all pods"   # single query and exit
   kq --url http://host:8000   # custom API URL
+  kq --backend openai         # talk directly to OpenAI (bypass kube-q server)
+  kq --backend azure          # talk directly to Azure OpenAI
+  kq --profile prod           # load ~/.kube-q/profiles/prod.env on top of defaults
+  kq --context prod-cluster   # kubectl context prepended to every query
+  kq config show              # list effective config keys with their source
+  kq config set KEY=VAL       # persist a value to ~/.kube-q/.env
+  kq config reset [KEY]       # remove KEY (or wipe ~/.kube-q/.env when no KEY)
+  kq config profile list      # list profiles in ~/.kube-q/profiles/
+  kq config profile new NAME  # create a new profile template
   kq --no-stream              # disable streaming
   kq --user-id myuser         # set persistent user ID
   kq --no-banner              # suppress logo (screen recording)
@@ -23,10 +32,18 @@ Usage:
   kq --no-health-check        # skip startup health check (useful for web/scripted contexts)
 
 Environment variables:
-  KUBE_Q_URL=http://...              # set API URL
-  KUBE_Q_API_KEY=...                # set API key (required when server auth is enabled)
-  KUBE_Q_MODEL=kubeintellect-v2     # model name sent in requests
-  KUBE_Q_SKIP_HEALTH_CHECK=true     # skip startup health check
+  KUBE_Q_URL=http://...                 # set API URL
+  KUBE_Q_API_KEY=...                    # set API key (required when server auth is enabled)
+  KUBE_Q_MODEL=kubeintellect-v2         # model name sent in requests
+  KUBE_Q_SKIP_HEALTH_CHECK=true         # skip startup health check
+  KUBE_Q_BACKEND=kube-q|openai|azure    # select backend
+  KUBE_Q_OPENAI_API_KEY=sk-...          # used when backend=openai
+  KUBE_Q_AZURE_OPENAI_API_KEY=...       # used when backend=azure
+  KUBE_Q_AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com
+  KUBE_Q_AZURE_OPENAI_DEPLOYMENT=my-deployment
+  KUBE_Q_CONTEXT=prod-cluster           # initial kubectl context
+  KUBE_Q_PROFILE=prod                   # load ~/.kube-q/profiles/prod.env
+  KUBE_Q_PLUGIN_DIR=~/.kube-q/plugins   # override plugin directory
 
 Config (~/.kube-q/.env or ./.env):
   KUBE_Q_URL=http://localhost:8000
@@ -50,6 +67,9 @@ In-REPL commands:
   /clear         — clear the terminal screen
   /save [file]   — save conversation to markdown file
   /ns <name>     — set active namespace (/ns with no arg clears it)
+  /context <n>   — set kubectl context (/context with no arg lists/clears)
+  /profile [n]   — list profiles / show switch instructions
+  /plugins       — list loaded plugin commands
   /sessions      — list recent sessions (same as kq --list)
   /forget        — delete current session from local history
   /tokens        — show token counts and estimated cost for this session
@@ -58,6 +78,7 @@ In-REPL commands:
   /branch        — fork this conversation at the current point
   /branches      — list all forks of this session
   /title <text>  — rename the current session
+  /url [new-url] — show or change the backend URL (saves to ~/.kube-q/.env)
   /approve       — approve a pending HITL action
   /deny          — deny a pending HITL action
   /help          — show full in-REPL help
@@ -78,11 +99,14 @@ Attaching files:
 """
 
 import argparse
+import os
+import sys
 import uuid
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from urllib.parse import urlparse
 
+from kube_q.cli import config_cmd as _config_cmd
 from kube_q.cli.renderer import (
     _print_sessions_table,
     console,
@@ -94,6 +118,7 @@ from kube_q.cli.renderer import (
 from kube_q.cli.repl import ReplConfig, run_repl
 from kube_q.cli.store import list_sessions as _list_sessions
 from kube_q.cli.store import search_sessions as _search_sessions
+from kube_q.core.backends import BackendSpec, resolve_backend
 from kube_q.core.config import load_config, setup_logging
 from kube_q.core.session import load_or_create_user_id as _load_or_create_user_id
 from kube_q.core.transport import set_debug
@@ -103,6 +128,20 @@ try:
     __version__ = _pkg_version("kube-q")
 except PackageNotFoundError:
     __version__ = "unknown"
+
+
+def _peek_flag(argv: list[str], flag: str) -> str | None:
+    """Find ``--flag value`` or ``--flag=value`` in argv without consuming it.
+
+    Used for options that must be resolved before argparse (e.g. --profile,
+    which changes how load_config() reads .env files).
+    """
+    for i, arg in enumerate(argv):
+        if arg == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(f"{flag}="):
+            return arg[len(flag) + 1:]
+    return None
 
 
 # ── Single-query mode ─────────────────────────────────────────────────────────
@@ -116,6 +155,9 @@ def run_single_query(
     ca_cert: str | None = None,
     timeout: float = 120.0,
     model: str = "kubeintellect-v2",
+    *,
+    chat_path: str = "/v1/chat/completions",
+    auth_scheme: str = "bearer",
 ) -> None:
     conversation_id = str(uuid.uuid4())
     if user_id is None:
@@ -124,15 +166,29 @@ def run_single_query(
 
     if stream:
         stream_query(url, messages, conversation_id, user_id,
-                     api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model)
+                     api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model,
+                     chat_path=chat_path, auth_scheme=auth_scheme)
     else:
         non_stream_query(url, messages, conversation_id, user_id,
-                         api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model)
+                         api_key=api_key, ca_cert=ca_cert, timeout=timeout, model=model,
+                         chat_path=chat_path, auth_scheme=auth_scheme)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
+    # `kq config ...` is handled before argparse so we don't have to thread
+    # every flag through the subcommand parser.
+    if len(sys.argv) >= 2 and sys.argv[1] == "config":
+        sys.exit(_config_cmd.run(sys.argv[2:]))
+
+    # --profile must be applied before load_config() so the profile's .env
+    # contributes to defaults. Detect it early.
+    _peek_profile = _peek_flag(sys.argv[1:], "--profile")
+    if _peek_profile:
+        import os as _os
+        _os.environ["KUBE_Q_PROFILE"] = _peek_profile
+
     # Load config file first so CLI args can override it
     cfg = load_config()
 
@@ -269,6 +325,73 @@ def main() -> None:
             "and ~/.kube-q/kube-q.log"
         ),
     )
+    parser.add_argument(
+        "--backend",
+        choices=["kube-q", "openai", "azure"],
+        default=cfg.backend,
+        help=(
+            "Select the backend: 'kube-q' (default, uses --url), "
+            "'openai' (direct OpenAI), or 'azure' (Azure OpenAI). "
+            "(env: KUBE_Q_BACKEND)"
+        ),
+    )
+    parser.add_argument(
+        "--openai-api-key",
+        default=cfg.openai_api_key,
+        metavar="KEY",
+        help="OpenAI API key (env: KUBE_Q_OPENAI_API_KEY). Used when --backend=openai.",
+    )
+    parser.add_argument(
+        "--openai-endpoint",
+        default=cfg.openai_endpoint,
+        metavar="URL",
+        help=(
+            "OpenAI-compatible endpoint (env: KUBE_Q_OPENAI_ENDPOINT, "
+            "default: https://api.openai.com). Used when --backend=openai."
+        ),
+    )
+    parser.add_argument(
+        "--azure-openai-api-key",
+        default=cfg.azure_openai_api_key,
+        metavar="KEY",
+        help="Azure OpenAI key (env: KUBE_Q_AZURE_OPENAI_API_KEY).",
+    )
+    parser.add_argument(
+        "--azure-openai-endpoint",
+        default=cfg.azure_openai_endpoint,
+        metavar="URL",
+        help=(
+            "Azure OpenAI resource endpoint, e.g. https://my-res.openai.azure.com "
+            "(env: KUBE_Q_AZURE_OPENAI_ENDPOINT)."
+        ),
+    )
+    parser.add_argument(
+        "--azure-openai-deployment",
+        default=cfg.azure_openai_deployment,
+        metavar="NAME",
+        help=(
+            "Azure OpenAI deployment name — NOT the model name "
+            "(env: KUBE_Q_AZURE_OPENAI_DEPLOYMENT)."
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Load ~/.kube-q/profiles/<NAME>.env on top of the normal config "
+            "(env: KUBE_Q_PROFILE). Use 'kq config profile list' to see available profiles."
+        ),
+    )
+    parser.add_argument(
+        "--context",
+        default=cfg.kube_context,
+        metavar="NAME",
+        help=(
+            "kubectl context to target — prepended to every query as "
+            "[context: kube_context=...] (env: KUBE_Q_CONTEXT)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -287,15 +410,31 @@ def main() -> None:
     set_custom_logo(cfg.logo)
     set_custom_tagline(cfg.tagline)
 
-    # Warn on plain-HTTP connections to non-local hosts
-    parsed_url = urlparse(args.url)
-    if parsed_url.scheme == "http":
-        host = parsed_url.hostname or ""
-        if host not in ("localhost", "127.0.0.1", "::1", ""):
-            console.print(
-                f"[yellow]Warning:[/yellow] connecting over plain HTTP to "
-                f"[bold]{args.url}[/bold] — consider using HTTPS in production."
-            )
+    # Fold CLI args back into cfg so resolve_backend() sees everything
+    cfg.url                     = args.url
+    cfg.api_key                 = args.api_key
+    cfg.model                   = args.model
+    cfg.backend                 = args.backend
+    cfg.openai_api_key          = args.openai_api_key
+    cfg.openai_endpoint         = args.openai_endpoint
+    cfg.azure_openai_api_key    = args.azure_openai_api_key
+    cfg.azure_openai_endpoint   = args.azure_openai_endpoint
+    cfg.azure_openai_deployment = args.azure_openai_deployment
+    cfg.kube_context            = args.context
+
+    backend: BackendSpec = resolve_backend(cfg)
+
+    # Warn on plain-HTTP connections to non-local hosts (only for kube-q backend;
+    # OpenAI/Azure are https and the user owns the endpoint choice).
+    if backend.kind == "kube-q":
+        parsed_url = urlparse(backend.url)
+        if parsed_url.scheme == "http":
+            host = parsed_url.hostname or ""
+            if host not in ("localhost", "127.0.0.1", "::1", ""):
+                console.print(
+                    f"[yellow]Warning:[/yellow] connecting over plain HTTP to "
+                    f"[bold]{backend.url}[/bold] — consider using HTTPS in production."
+                )
 
     if args.list:
         _print_sessions_table(_list_sessions(20))
@@ -309,33 +448,43 @@ def main() -> None:
             console.print(f"[dim]No sessions matched '{args.search}'.[/dim]")
         return
 
+    # For non-kube-q backends, there's no /healthz endpoint — skip by default
+    skip_health = args.skip_health_check or backend.health_path is None
+
     if args.query:
         run_single_query(
-            args.url, args.query, stream,
-            user_id=user_id, api_key=args.api_key, ca_cert=args.ca_cert,
-            timeout=cfg.timeout, model=args.model,
+            backend.url, args.query, stream,
+            user_id=user_id, api_key=backend.api_key, ca_cert=args.ca_cert,
+            timeout=cfg.timeout, model=backend.model,
+            chat_path=backend.chat_path, auth_scheme=backend.auth_scheme,
         )
     else:
         run_repl(ReplConfig(
-            url=args.url,
+            url=backend.url,
             stream=stream,
             initial_conversation_id=args.conversation_id,
             initial_session_id=args.session_id,
             user_id=user_id,
             quiet=args.quiet,
-            api_key=args.api_key,
+            api_key=backend.api_key,
             ca_cert=args.ca_cert,
             query_timeout=cfg.timeout,
             health_timeout=cfg.health_timeout,
             namespace_timeout=cfg.namespace_timeout,
             startup_retry_timeout=cfg.startup_retry_timeout,
             startup_retry_interval=cfg.startup_retry_interval,
-            skip_health_check=args.skip_health_check,
+            skip_health_check=skip_health,
             user_name=args.user_name,
             agent_name=args.agent_name,
-            model=args.model,
+            model=backend.model,
             cost_prompt_override=cfg.cost_per_1k_prompt,
             cost_completion_override=cfg.cost_per_1k_completion,
+            chat_path=backend.chat_path,
+            auth_scheme=backend.auth_scheme,
+            health_path=backend.health_path,
+            backend_label=backend.label,
+            kube_context=args.context,
+            profile=os.environ.get("KUBE_Q_PROFILE"),
         ))
 
 

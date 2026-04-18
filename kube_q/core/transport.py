@@ -89,13 +89,24 @@ def build_headers(
     request_id: str,
     *,
     accept: str | None = None,
+    auth_scheme: str = "bearer",
 ) -> dict[str, str]:
+    """Build request headers.
+
+    ``auth_scheme`` controls how the API key is sent:
+      * ``"bearer"`` — ``Authorization: Bearer <key>`` (kube-q, OpenAI)
+      * ``"api-key"`` — ``api-key: <key>`` (Azure OpenAI)
+      * ``"none"`` — no auth header (even if api_key is set)
+    """
     headers: dict[str, str] = {
         "X-Session-ID": session_id,
         "X-Request-ID": request_id,
     }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    if api_key and auth_scheme != "none":
+        if auth_scheme == "api-key":
+            headers["api-key"] = api_key
+        else:  # "bearer" (default)
+            headers["Authorization"] = f"Bearer {api_key}"
     if accept:
         headers["Accept"] = accept
     return headers
@@ -146,20 +157,31 @@ def check_health(
     api_key: str | None = None,
     ca_cert: str | None = None,
     timeout: float = 5.0,
+    health_path: str | None = "/healthz",
+    auth_scheme: str = "bearer",
 ) -> tuple[bool, str]:
-    """Check API reachability. Returns (ok, reason)."""
+    """Check API reachability. Returns (ok, reason).
+
+    If ``health_path`` is None, returns (True, "") without making a network call —
+    used for backends (OpenAI, Azure) that don't expose a health endpoint.
+    """
+    if health_path is None:
+        return True, ""
     headers: dict[str, str] = {}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    _logger.debug("check_health url=%s", url)
+        if auth_scheme == "api-key":
+            headers["api-key"] = api_key
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
+    _logger.debug("check_health url=%s path=%s", url, health_path)
     try:
         with make_client(ca_cert, timeout=timeout) as client:
-            r = client.get(f"{url}/healthz", headers=headers)
+            r = client.get(f"{url}{health_path}", headers=headers)
         if r.status_code == 200:
             return True, ""
         if r.status_code == 401:
             return False, "Authentication required — set KUBE_Q_API_KEY or pass --api-key"
-        return False, f"HTTP {r.status_code} from {url}/healthz"
+        return False, f"HTTP {r.status_code} from {url}{health_path}"
     except httpx.ConnectError as e:
         msg = str(e)
         if any(k in msg for k in _DNS_KEYWORDS):

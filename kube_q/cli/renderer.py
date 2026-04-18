@@ -3,6 +3,7 @@ renderer.py — Display utilities: Rich console, ANSI helpers, logo, markdown re
 and side-channel event renderers for the CLI.
 """
 
+import datetime
 import sys
 
 from rich.console import Console
@@ -11,6 +12,11 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
+
+
+def error_timestamp() -> str:
+    """Return a dim Rich-markup prefix like '[dim][14:07:33][/dim] ' for error lines."""
+    return f"[dim][{datetime.datetime.now().strftime('%H:%M:%S')}][/dim] "
 
 # ── Rich console ──────────────────────────────────────────────────────────────
 
@@ -82,6 +88,29 @@ def _print_logo(connected: bool = True) -> None:
         print(art)
         print(f"\033[2m   {tagline}\033[0m")
     print()
+
+
+def _print_not_connected_panel(url: str, reason: str) -> None:
+    """Show an actionable panel when the backend is unreachable."""
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    console.print(Panel(
+        f"[red bold]✗ Cannot reach:[/red bold] {url}\n"
+        f"[dim]  Time:   {ts}[/dim]\n"
+        f"[dim]  Reason: {reason}[/dim]\n\n"
+        "[bold]To configure the backend URL:[/bold]\n"
+        "  [yellow]kq --url http://host:8000[/yellow]"
+        "                    One-time launch flag\n"
+        "  [yellow]export KUBE_Q_URL=http://host:8000[/yellow]"
+        "             Current shell session\n"
+        "  [yellow]/url http://host:8000[/yellow]"
+        "                         Change without restarting\n"
+        "  [yellow]echo 'KUBE_Q_URL=http://...' >> ~/.kube-q/.env[/yellow]"
+        "   Persist permanently\n\n"
+        "[dim]These commands work offline: "
+        "/help  /sessions  /save  /state  /tokens  /search  /branch[/dim]",
+        title="[red]Backend not reachable[/red]",
+        border_style="red",
+    ))
 
 
 # ── Output format ─────────────────────────────────────────────────────────────
@@ -157,7 +186,9 @@ def render_tool_call(event: dict) -> None:
 
 def render_error_event(event: dict) -> None:
     """Render an ``error`` side-channel event."""
-    console.print(f"[red]✗ {event.get('message', str(event))}[/red]")
+    console.print(
+        f"{error_timestamp()}[red]✗ {event.get('message', str(event))}[/red]"
+    )
 
 
 # ── Help panel ────────────────────────────────────────────────────────────────
@@ -347,6 +378,19 @@ def _fmt_help() -> None:
         "  [yellow]/ns <name>[/yellow]          Set active namespace — prepended to every query\n"
         "  [yellow]/ns[/yellow]                 Clear active namespace\n\n"
 
+        # ── Kubernetes context ────────────────────────────────────────────────
+        "[bold cyan]Kubernetes context[/bold cyan]\n\n"
+        "  [yellow]/context <name>[/yellow]     Set active kubectl context — prepended to every query\n"  # noqa: E501
+        "  [yellow]/context[/yellow]            Clear active context\n"
+        "  [dim]Tab-completes from your kubeconfig (kubectl config get-contexts).[/dim]\n\n"
+
+        # ── Profiles & plugins ────────────────────────────────────────────────
+        "[bold cyan]Profiles & plugins[/bold cyan]\n\n"
+        "  [yellow]/profile[/yellow]            List available profiles in ~/.kube-q/profiles/\n"
+        "  [yellow]/profile <name>[/yellow]     Show restart command for a named profile  [dim](switching requires restart)[/dim]\n"  # noqa: E501
+        "  [yellow]/plugins[/yellow]            List loaded plugins from ~/.kube-q/plugins/\n"
+        "  [dim]Profiles are .env fragments per cluster; plugins register extra slash commands.[/dim]\n\n"  # noqa: E501
+
         # ── Session history ───────────────────────────────────────────────────
         "[bold cyan]Session history[/bold cyan]\n\n"
         "  [yellow]/sessions[/yellow]           List recent sessions  "
@@ -381,6 +425,7 @@ def _fmt_help() -> None:
 
         # ── Terminal ──────────────────────────────────────────────────────────
         "[bold cyan]Terminal[/bold cyan]\n\n"
+        "  [yellow]/url[/yellow] [dim][new-url][/dim]        Show or change the backend URL  [dim](saves to ~/.kube-q/.env)[/dim]\n"  # noqa: E501
         "  [yellow]/clear[/yellow]              Clear the terminal screen\n"
         "  [yellow]/help[/yellow]               Show this help\n"
         "  [yellow]/quit[/yellow]  [dim]/exit  /q[/dim]   Exit kube-q\n\n"
@@ -404,6 +449,14 @@ def _fmt_help() -> None:
         "  [dim]kq --model <name>[/dim]            Override model name sent in requests\n"
         "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
         "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501
+        "  [dim]kq --backend kube-q|openai|azure[/dim]  Pick the LLM backend  [dim](default: kube-q)[/dim]\n"  # noqa: E501
+        "  [dim]kq --openai-api-key <key>[/dim]      Use direct OpenAI backend\n"
+        "  [dim]kq --openai-endpoint <url>[/dim]     Override the OpenAI endpoint\n"
+        "  [dim]kq --azure-openai-api-key <key>[/dim]\n"
+        "  [dim]kq --azure-openai-endpoint <url>[/dim]\n"
+        "  [dim]kq --azure-openai-deployment <name>[/dim]  Azure OpenAI backend config\n"
+        "  [dim]kq --profile <name>[/dim]           Load ~/.kube-q/profiles/<name>.env before start\n"  # noqa: E501
+        "  [dim]kq --context <name>[/dim]           Set active kubectl context at startup\n"
         "  [dim]KUBE_Q_URL=http://...[/dim]             Set API URL via environment variable\n"
         "  [dim]KUBE_Q_API_KEY=...[/dim]                Set API key via environment variable  [dim](avoids 401 errors)[/dim]\n"  # noqa: E501
         "  [dim]KUBE_Q_MODEL=...[/dim]                  Override model name via "
@@ -420,7 +473,17 @@ def _fmt_help() -> None:
         "  [dim]KUBE_Q_STARTUP_RETRY_TIMEOUT, KUBE_Q_STARTUP_RETRY_INTERVAL[/dim]\n"
         "  [dim]KUBE_Q_STREAM, KUBE_Q_OUTPUT, KUBE_Q_LOG_LEVEL[/dim]\n"
         "  [dim]KUBE_Q_USER_NAME, KUBE_Q_AGENT_NAME[/dim]\n"
-        "  [dim]KUBE_Q_COST_PER_1K_PROMPT, KUBE_Q_COST_PER_1K_COMPLETION[/dim]\n\n"
+        "  [dim]KUBE_Q_COST_PER_1K_PROMPT, KUBE_Q_COST_PER_1K_COMPLETION[/dim]\n"
+        "  [dim]KUBE_Q_BACKEND, KUBE_Q_OPENAI_API_KEY, KUBE_Q_OPENAI_ENDPOINT, KUBE_Q_OPENAI_MODEL[/dim]\n"  # noqa: E501
+        "  [dim]KUBE_Q_AZURE_OPENAI_API_KEY, KUBE_Q_AZURE_OPENAI_ENDPOINT,[/dim]\n"
+        "  [dim]  KUBE_Q_AZURE_OPENAI_DEPLOYMENT, KUBE_Q_AZURE_OPENAI_API_VERSION[/dim]\n"
+        "  [dim]KUBE_Q_CONTEXT, KUBE_Q_PROFILE[/dim]\n\n"
+        "  [yellow]kq config show[/yellow]            List every key with its value and source\n"
+        "  [yellow]kq config set KEY=VAL[/yellow]     Persist a value to ~/.kube-q/.env\n"
+        "  [yellow]kq config reset [KEY][/yellow]    Remove a key (or wipe the file)\n"
+        "  [yellow]kq config profile list[/yellow]   List named profiles in ~/.kube-q/profiles/\n"
+        "  [yellow]kq config profile new NAME[/yellow]  Create a new profile .env from template\n"
+        "  [yellow]kq config profile show NAME[/yellow] / [yellow]delete NAME[/yellow]\n\n"
         "  Logs are written to [dim]~/.kube-q/kube-q.log[/dim]",
         title="[bold cyan]kube-q Help[/bold cyan]",
         border_style="cyan",

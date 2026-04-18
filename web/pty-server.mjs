@@ -66,9 +66,16 @@ if (dotEnv.KUBE_Q_URL) console.log(`[pty] KUBE_Q_URL from .env: ${dotEnv.KUBE_Q_
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const PORT = Number(process.env.PTY_PORT ?? 3001);
-const CMD  = process.env.PTY_CMD         ?? "kq";
-const ARGS = process.env.PTY_ARGS ? process.env.PTY_ARGS.split(",") : [];
+const PORT       = Number(process.env.PTY_PORT ?? 3001);
+const CMD        = process.env.PTY_CMD         ?? "kq";
+const ARGS       = process.env.PTY_ARGS ? process.env.PTY_ARGS.split(",") : [];
+const AUTH_TOKEN = process.env.PTY_AUTH_TOKEN ?? kqEnv.PTY_AUTH_TOKEN ?? "";
+
+if (AUTH_TOKEN) {
+  console.log("[pty] auth: enabled (PTY_AUTH_TOKEN set)");
+} else {
+  console.log("[pty] auth: disabled (set PTY_AUTH_TOKEN to require a token)");
+}
 
 // ── HTTP server (WebSocket upgrade only) ──────────────────────────────────────
 
@@ -94,6 +101,16 @@ wss.on("connection", (ws, req) => {
   const url    = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const cols   = Number(url.searchParams.get("cols") ?? 220);
   const rows   = Number(url.searchParams.get("rows") ?? 50);
+
+  // Auth gate: if PTY_AUTH_TOKEN is set, require matching ?token=...
+  if (AUTH_TOKEN) {
+    const provided = url.searchParams.get("token") ?? "";
+    if (provided !== AUTH_TOKEN) {
+      console.warn(`[pty] auth reject ${remote} (token ${provided ? "mismatch" : "missing"})`);
+      ws.close(1008, "authentication failed");
+      return;
+    }
+  }
 
   // Spawn the kq process
   let proc;

@@ -20,6 +20,7 @@ from rich.text import Text
 from kube_q.cli.renderer import (
     _plain_output,
     console,
+    error_timestamp,
     print_response,
     render_error_event,
     render_status,
@@ -55,6 +56,7 @@ def _stream_once(
     on_status: Callable[[dict, Live, bool], None] = render_status,
     on_tool_call: Callable[[dict], None] = render_tool_call,
     on_error: Callable[[dict], None] = render_error_event,
+    chat_path: str = "/v1/chat/completions",
 ) -> tuple[str, bool, str | None, dict | None]:
     """One streaming attempt. Raises httpx.TransportError on connection failure.
 
@@ -73,7 +75,7 @@ def _stream_once(
         refresh_per_second=12,
         transient=True,
     ) as live:
-        with client.stream("POST", f"{url}/v1/chat/completions",
+        with client.stream("POST", f"{url}{chat_path}",
                            json=payload, headers=headers) as resp:
             if resp.status_code == 401:
                 live.stop()
@@ -166,6 +168,8 @@ def stream_query(
     timeout: float = 120.0,
     request_id: str | None = None,
     model: str = "kubeintellect-v2",
+    chat_path: str = "/v1/chat/completions",
+    auth_scheme: str = "bearer",
 ) -> tuple[str, bool, str | None, dict | None]:
     """Send a streaming chat request. Returns (full_text, hitl_pending, action_id, usage)."""
     if request_id is None:
@@ -175,7 +179,10 @@ def stream_query(
         session_id, user, request_id, url,
     )
     payload = build_payload(messages, user, True, model)
-    headers = build_headers(api_key, session_id, request_id, accept="text/event-stream")
+    headers = build_headers(
+        api_key, session_id, request_id,
+        accept="text/event-stream", auth_scheme=auth_scheme,
+    )
 
     with make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(QUERY_RETRY_DELAYS) + 1):
@@ -187,16 +194,18 @@ def stream_query(
                 )
                 time.sleep(delay)
             try:
-                return _stream_once(url, payload, headers, client)
+                return _stream_once(url, payload, headers, client, chat_path=chat_path)
             except httpx.TransportError as exc:
                 reason = describe_error(url, exc)
                 if attempt == 0:
-                    console.print(f"\n[red]Disconnected:[/red] {reason}")
+                    console.print(
+                        f"\n{error_timestamp()}[red]Disconnected:[/red] {reason}"
+                    )
                 else:
-                    console.print(f"[dim]    → {reason}[/dim]")
+                    console.print(f"{error_timestamp()}[dim]    → {reason}[/dim]")
 
     console.print(
-        "[red]  All retries failed.[/red] "
+        f"{error_timestamp()}[red]  All retries failed.[/red] "
         "[dim]Check your connection and API URL, then try again.[/dim]"
     )
     return "", False, None, None
@@ -213,6 +222,8 @@ def non_stream_query(
     timeout: float = 120.0,
     request_id: str | None = None,
     model: str = "kubeintellect-v2",
+    chat_path: str = "/v1/chat/completions",
+    auth_scheme: str = "bearer",
 ) -> tuple[str, bool, str | None, dict | None]:
     """Send a non-streaming chat request.
 
@@ -225,7 +236,7 @@ def non_stream_query(
         session_id, user, request_id, url,
     )
     payload = build_payload(messages, user, False, model)
-    headers = build_headers(api_key, session_id, request_id)
+    headers = build_headers(api_key, session_id, request_id, auth_scheme=auth_scheme)
 
     with make_client(ca_cert, timeout=timeout) as client:
         for attempt in range(len(QUERY_RETRY_DELAYS) + 1):
@@ -239,7 +250,7 @@ def non_stream_query(
             try:
                 t0 = time.monotonic()
                 resp = client.post(
-                    f"{url}/v1/chat/completions", json=payload, headers=headers
+                    f"{url}{chat_path}", json=payload, headers=headers
                 )
                 elapsed = time.monotonic() - t0
 
@@ -294,12 +305,14 @@ def non_stream_query(
             except httpx.TransportError as exc:
                 reason = describe_error(url, exc)
                 if attempt == 0:
-                    console.print(f"\n[red]Disconnected:[/red] {reason}")
+                    console.print(
+                        f"\n{error_timestamp()}[red]Disconnected:[/red] {reason}"
+                    )
                 else:
-                    console.print(f"[dim]    → {reason}[/dim]")
+                    console.print(f"{error_timestamp()}[dim]    → {reason}[/dim]")
 
     console.print(
-        "[red]  All retries failed.[/red] "
+        f"{error_timestamp()}[red]  All retries failed.[/red] "
         "[dim]Check your connection and API URL, then try again.[/dim]"
     )
     return "", False, None, None

@@ -114,4 +114,5 @@ class SessionState:
     hitl_pending: bool = False
     pending_action_id: str | None = None
     current_namespace: str | None = None
+    current_context: str | None = None
     last_request_id: str | None = None

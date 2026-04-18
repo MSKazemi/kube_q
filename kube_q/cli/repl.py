@@ -8,10 +8,11 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import Completer, Completion, WordCompleter
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -20,17 +21,20 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
-from kube_q import costs, store
+from kube_q import costs, plugins, store
 from kube_q.cli.renderer import (
     _fmt_help,
     _print_logo,
+    _print_not_connected_panel,
     _print_sessions_table,
     _print_token_panel,
     console,
+    error_timestamp,
     format_branches,
     format_search_results,
 )
 from kube_q.core.config import CONFIG_DIR
+from kube_q.core.kubeconfig import list_contexts
 from kube_q.core.session import (
     SessionState,
 )
@@ -61,7 +65,7 @@ class ReplConfig:
     query_timeout: float = 120.0
     health_timeout: float = 5.0
     namespace_timeout: float = 3.0
-    startup_retry_timeout: int = 300
+    startup_retry_timeout: int = 0
     startup_retry_interval: int = 5
     skip_health_check: bool = False
     user_name: str = "You"
@@ -69,6 +73,15 @@ class ReplConfig:
     model: str = "kubeintellect-v2"
     cost_prompt_override: float | None = None
     cost_completion_override: float | None = None
+    # Backend routing
+    chat_path: str = "/v1/chat/completions"
+    auth_scheme: str = "bearer"
+    health_path: str | None = "/healthz"
+    backend_label: str = "kube-q"
+    # Kubernetes context
+    kube_context: str | None = None
+    # Active profile name (for display only)
+    profile: str | None = None
 
 
 # ── Prompt session config ─────────────────────────────────────────────────────
@@ -76,13 +89,79 @@ class ReplConfig:
 _SLASH_COMMANDS = [
     "/new", "/id", "/state", "/clear", "/save", "/approve", "/deny",
     "/help", "/ns", "/sessions", "/forget", "/tokens", "/cost",
-    "/search", "/branch", "/branches", "/title",
+    "/search", "/branch", "/branches", "/title", "/url",
+    "/context", "/profile", "/plugins",
     "/quit", "/exit", "/q",
 ]
 _HISTORY_FILE = str(CONFIG_DIR / "history")
 
 
-def _make_prompt_session() -> PromptSession:
+def _update_env_url(new_url: str) -> None:
+    """Write/replace KUBE_Q_URL in ~/.kube-q/.env (creates file if absent)."""
+    env_path = Path.home() / ".kube-q" / ".env"
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = env_path.read_text().splitlines() if env_path.exists() else []
+    lines = [ln for ln in lines if not ln.startswith("KUBE_Q_URL=")]
+    lines.append(f"KUBE_Q_URL={new_url}")
+    env_path.write_text("\n".join(lines) + "\n")
+
+
+class _KqCompleter(Completer):
+    """Tab-completer for slash commands with argument-aware suggestions.
+
+    Defers to a plain WordCompleter for the command itself, then switches to
+    a context-specific list once the user types ``/context <TAB>`` or
+    ``/profile <TAB>``. Unknown contexts fall through to no suggestions.
+    """
+
+    def __init__(
+        self,
+        contexts: list[str] | None = None,
+        profiles: list[str] | None = None,
+        extra_commands: list[str] | None = None,
+    ) -> None:
+        self._commands = list(_SLASH_COMMANDS) + list(extra_commands or [])
+        self._contexts = contexts or []
+        self._profiles = profiles or []
+        self._cmd_completer = WordCompleter(self._commands, sentence=False)
+
+    def get_completions(self, document: Any, complete_event: Any) -> Any:
+        text = document.text_before_cursor
+        # Only trigger completion when the line starts with a slash command.
+        if not text.startswith("/"):
+            return
+        parts = text.split(maxsplit=1)
+        if len(parts) == 1 and not text.endswith(" "):
+            # Still typing the command itself
+            yield from self._cmd_completer.get_completions(document, complete_event)
+            return
+        cmd = parts[0].lower()
+        arg = parts[1] if len(parts) > 1 else ""
+        choices: list[str] = []
+        if cmd == "/context":
+            choices = self._contexts
+        elif cmd == "/profile":
+            choices = self._profiles
+        else:
+            return
+        for choice in choices:
+            if choice.startswith(arg):
+                yield Completion(choice, start_position=-len(arg))
+
+
+def _list_profiles() -> list[str]:
+    """Return stem names of .env files in ~/.kube-q/profiles/."""
+    from kube_q.core.config import PROFILES_DIR
+    if not PROFILES_DIR.exists():
+        return []
+    return sorted(p.stem for p in PROFILES_DIR.glob("*.env"))
+
+
+def _make_prompt_session(
+    contexts: list[str] | None = None,
+    profiles: list[str] | None = None,
+    extra_commands: list[str] | None = None,
+) -> PromptSession:
     """Return a PromptSession with chat-style key bindings.
 
     Enter           = send message  (like Slack / ChatGPT).
@@ -100,7 +179,9 @@ def _make_prompt_session() -> PromptSession:
     def _alt_enter_newline(event: Any) -> None:
         event.current_buffer.insert_text("\n")
 
-    completer = WordCompleter(_SLASH_COMMANDS, sentence=True)
+    completer = _KqCompleter(
+        contexts=contexts, profiles=profiles, extra_commands=extra_commands,
+    )
     return PromptSession(
         history=FileHistory(_HISTORY_FILE),
         completer=completer,
@@ -156,6 +237,10 @@ def run_repl(cfg: ReplConfig) -> None:
     model = cfg.model
     cost_prompt_override = cfg.cost_prompt_override
     cost_completion_override = cfg.cost_completion_override
+    chat_path = cfg.chat_path
+    auth_scheme = cfg.auth_scheme
+    health_path = cfg.health_path
+    backend_label = cfg.backend_label
 
     # initial_session_id takes precedence over initial_conversation_id
     effective_id = initial_session_id or initial_conversation_id
@@ -166,6 +251,11 @@ def run_repl(cfg: ReplConfig) -> None:
         user_id=resolved_user_id,
         messages=list(initial_messages) if initial_messages else [],
     )
+    state.current_context = cfg.kube_context
+
+    # ── Load user plugins (best-effort) ───────────────────────────────────────
+    loaded_plugins = plugins.load_plugins()
+    plugin_cmds = list(plugins.registered_commands().keys())
 
     # Hydrate from store when resuming a named session
     if initial_session_id and not initial_messages:
@@ -177,18 +267,19 @@ def run_repl(cfg: ReplConfig) -> None:
     _pending_retry: str = ""  # pre-fills next prompt after a failed send
 
     if show_header and not quiet:
-        if skip_health_check:
+        if skip_health_check or health_path is None:
             connected = True
             reason = ""
         else:
             connected, reason = check_health(
-                url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout
+                url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
+                health_path=health_path, auth_scheme=auth_scheme,
             )
 
         if not connected:
             deadline = time.monotonic() + startup_retry_timeout
 
-            console.print(f"[yellow]Cannot reach {url}/healthz[/yellow]")
+            console.print(f"[yellow]Cannot reach {url}{health_path or ''}[/yellow]")
             console.print(f"[dim]  Reason: {reason}[/dim]")
             console.print(
                 f"[dim]  Retrying every {startup_retry_interval}s "
@@ -214,7 +305,8 @@ def run_repl(cfg: ReplConfig) -> None:
                         time.sleep(min(startup_retry_interval, max(0, remaining)))
 
                     connected, reason = check_health(
-                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout
+                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
+                        health_path=health_path, auth_scheme=auth_scheme,
                     )
             except KeyboardInterrupt:
                 console.print(
@@ -226,26 +318,46 @@ def run_repl(cfg: ReplConfig) -> None:
             if connected:
                 console.print(f"[green]Connected to {url}[/green]\n")
             else:
-                console.print(
-                    f"[red]Still cannot reach {url}/healthz.[/red]"
-                )
-                console.print(f"[dim]  Last reason: {reason}[/dim]")
-                console.print(
-                    "[dim]  Continuing anyway — queries will fail until the API is up.[/dim]\n"
-                )
+                _print_not_connected_panel(url, reason)
 
         _print_logo(connected=connected)
+        backend_part = (
+            f"   [dim]Backend:[/dim] {backend_label}"
+            if backend_label and backend_label != "kube-q"
+            else ""
+        )
+        profile_part = (
+            f"   [dim]Profile:[/dim] {cfg.profile}" if cfg.profile else ""
+        )
+        context_part = (
+            f"   [dim]Context:[/dim] {state.current_context}"
+            if state.current_context else ""
+        )
+        plugin_part = (
+            f"\n[dim]Plugins loaded: {', '.join(loaded_plugins)}[/dim]"
+            if loaded_plugins else ""
+        )
         console.print(Panel.fit(
-            f"[dim]API:[/dim] {url}   "
+            f"[dim]API:[/dim] {url}{backend_part}{profile_part}{context_part}\n"
             f"[dim]Conversation:[/dim] {state.conversation_id}\n"
             f"[dim]Type [yellow]/help[/yellow] for commands · "
             f"[yellow]Enter[/yellow] to send · "
-            f"[yellow]Alt+Enter[/yellow] for newline[/dim]",
+            f"[yellow]Alt+Enter[/yellow] for newline[/dim]"
+            f"{plugin_part}",
             border_style="dim cyan",
         ))
         console.print()
 
-    pt_session = _make_prompt_session()
+    # Load kubectl contexts once for tab-completion; cheap enough to do every start.
+    try:
+        _kube_contexts = list_contexts()
+    except Exception:
+        _kube_contexts = []
+    pt_session = _make_prompt_session(
+        contexts=_kube_contexts,
+        profiles=_list_profiles(),
+        extra_commands=plugin_cmds,
+    )
 
     while True:
         if state.hitl_pending:
@@ -299,6 +411,13 @@ def run_repl(cfg: ReplConfig) -> None:
                 if ns
                 else "  [dim]Namespace    [/dim] [dim italic](none)[/dim italic]"
             )
+            ctx = state.current_context
+            ctx_line = (
+                f"  [dim]Kube Context [/dim] {ctx}"
+                if ctx
+                else "  [dim]Kube Context [/dim] [dim italic](none)[/dim italic]"
+            )
+            backend_line = f"  [dim]Backend      [/dim] {backend_label}"
             hitl_line = (
                 f"  [dim]HITL pending [/dim] [bold yellow]yes — action_id={state.pending_action_id}[/bold yellow]"  # noqa: E501
                 if state.hitl_pending
@@ -321,6 +440,8 @@ def run_repl(cfg: ReplConfig) -> None:
                 f"  [dim]User ID      [/dim] {state.user_id}\n"
                 f"  [dim]Messages     [/dim] {len(state.messages)}\n"
                 f"{tokens_line}\n"
+                f"{backend_line}\n"
+                f"{ctx_line}\n"
                 f"{ns_line}\n"
                 f"{hitl_line}",
                 title="[bold cyan]Session State[/bold cyan]",
@@ -345,6 +466,87 @@ def run_repl(cfg: ReplConfig) -> None:
             _save_conversation(
                 state.messages, save_path, user_name=user_name, agent_name=agent_name
             )
+            continue
+
+        if user_input.lower().startswith("/context"):
+            parts = user_input.split(maxsplit=1)
+            ctx_arg = parts[1].strip() if len(parts) > 1 else ""
+            if not ctx_arg:
+                if state.current_context:
+                    state.current_context = None
+                    console.print("[dim]Kubernetes context cleared.[/dim]")
+                else:
+                    known = _kube_contexts or list_contexts()
+                    if known:
+                        console.print("[dim]Available kubectl contexts:[/dim]")
+                        for name in known:
+                            console.print(f"  • {name}")
+                    else:
+                        console.print(
+                            "[dim]No kubectl contexts found "
+                            "(is kubectl installed and is ~/.kube/config valid?).[/dim]"
+                        )
+            else:
+                known = _kube_contexts or list_contexts()
+                if known and ctx_arg not in known:
+                    console.print(
+                        f"[yellow]Warning:[/yellow] '{ctx_arg}' is not in your kubeconfig. "
+                        "Setting anyway — the backend may still accept it."
+                    )
+                state.current_context = ctx_arg
+                console.print(
+                    f"[dim]Active kube context set to[/dim] [bold]{ctx_arg}[/bold]"
+                )
+            continue
+
+        if user_input.lower().startswith("/profile"):
+            parts = user_input.split(maxsplit=1)
+            prof_arg = parts[1].strip() if len(parts) > 1 else ""
+            profiles_here = _list_profiles()
+            if not prof_arg:
+                if not profiles_here:
+                    console.print(
+                        "[dim]No profiles in ~/.kube-q/profiles/. "
+                        "Create one with [yellow]kq config profile new <name>[/yellow].[/dim]"
+                    )
+                else:
+                    active = cfg.profile or "[dim](none)[/dim]"
+                    console.print(f"[dim]Active profile:[/dim] {active}")
+                    console.print("[dim]Available profiles:[/dim]")
+                    for p in profiles_here:
+                        mark = "→" if p == cfg.profile else " "
+                        console.print(f"  {mark} {p}")
+                console.print(
+                    "[dim]Switching profiles mid-session is not supported — "
+                    "restart with [yellow]KUBE_Q_PROFILE=<name> kq[/yellow] "
+                    "or [yellow]kq --profile <name>[/yellow].[/dim]"
+                )
+            else:
+                console.print(
+                    f"[yellow]To use profile '{prof_arg}', restart kq:[/yellow]\n"
+                    f"  [bold]kq --profile {prof_arg}[/bold]\n"
+                    f"  [bold]KUBE_Q_PROFILE={prof_arg} kq[/bold]"
+                )
+            continue
+
+        if user_input.lower() == "/plugins":
+            entries = plugins.registered_commands()
+            if not entries:
+                console.print(
+                    "[dim]No plugins loaded. Drop Python files into "
+                    "[yellow]~/.kube-q/plugins/[/yellow] that call "
+                    "[yellow]kube_q.plugins.register(...)[/yellow].[/dim]"
+                )
+            else:
+                console.print(
+                    f"[bold cyan]Plugin commands ({len(entries)}):[/bold cyan]"
+                )
+                for name in sorted(entries):
+                    _fn, help_text = entries[name]
+                    console.print(
+                        f"  [yellow]{name}[/yellow]"
+                        + (f"  [dim]— {help_text}[/dim]" if help_text else "")
+                    )
             continue
 
         if user_input.lower().startswith("/ns"):
@@ -453,10 +655,48 @@ def run_repl(cfg: ReplConfig) -> None:
             user_input = "deny"
             state.hitl_pending = False
 
-        # Catch typos in unknown slash commands
+        elif user_input.lower().startswith("/url"):
+            parts = user_input.split(maxsplit=1)
+            if len(parts) < 2:
+                console.print(f"[dim]Current backend URL:[/dim] {url}")
+                console.print("[dim]Usage: /url http://host:8000[/dim]")
+            else:
+                new_url = parts[1].strip()
+                if not (new_url.startswith("http://") or new_url.startswith("https://")):
+                    console.print("[red]URL must start with http:// or https://[/red]")
+                else:
+                    url = new_url
+                    _update_env_url(new_url)
+                    _ok, _reason = check_health(
+                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
+                        health_path=health_path, auth_scheme=auth_scheme,
+                    )
+                    if _ok:
+                        console.print(f"[green]✓ Connected to {url}[/green]")
+                    else:
+                        console.print(f"[red]✗ Still cannot reach {url}[/red]")
+                        console.print(f"[dim]  Reason: {_reason}[/dim]")
+            continue
+
+        # Plugin slash commands
         elif user_input.startswith("/"):
-            cmd = user_input.split()[0].lower()
-            suggestions = difflib.get_close_matches(cmd, _SLASH_COMMANDS, n=1, cutoff=0.6)
+            parts = user_input.split(maxsplit=1)
+            cmd = parts[0].lower()
+            plug_args = parts[1] if len(parts) > 1 else ""
+            if plugins.dispatch(
+                cmd,
+                plugins.PluginContext(
+                    args=plug_args,
+                    state=state,
+                    cfg=cfg,
+                    console=console,
+                ),
+            ):
+                continue
+
+            # Catch typos in unknown slash commands
+            known = list(_SLASH_COMMANDS) + plugin_cmds
+            suggestions = difflib.get_close_matches(cmd, known, n=1, cutoff=0.6)
             if suggestions:
                 console.print(
                     f"[yellow]Unknown command.[/yellow] "
@@ -479,9 +719,15 @@ def run_repl(cfg: ReplConfig) -> None:
         if attached:
             console.print(f"[dim]Attached: {', '.join(attached)}[/dim]")
 
+        # Prepend namespace once (at /ns set) and kube context on every message
+        context_prefix = ""
+        if state.current_context:
+            context_prefix += f"[context: kube_context={state.current_context}] "
         if _prepend_ns_once and state.current_namespace:
-            user_input = f"[context: namespace={state.current_namespace}] {user_input}"
+            context_prefix += f"[context: namespace={state.current_namespace}] "
             _prepend_ns_once = False
+        if context_prefix:
+            user_input = context_prefix + user_input
         state.messages.append({"role": "user", "content": user_input})
 
         request_id = f"req-{uuid.uuid4()}"
@@ -492,20 +738,24 @@ def run_repl(cfg: ReplConfig) -> None:
                 url, state.messages, state.conversation_id, state.user_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
                 request_id=request_id, model=model,
+                chat_path=chat_path, auth_scheme=auth_scheme,
             )
         else:
             response_text, state.hitl_pending, action_id, usage = non_stream_query(
                 url, state.messages, state.conversation_id, state.user_id,
                 api_key=api_key, ca_cert=ca_cert, timeout=query_timeout,
                 request_id=request_id, model=model,
+                chat_path=chat_path, auth_scheme=auth_scheme,
             )
 
         if not response_text:
             state.messages.pop()
             _pending_retry = original_input
             console.print(
-                "[dim]  Request failed — your message is ready to resend. "
-                "Press Enter or edit before sending.[/dim]"
+                f"{error_timestamp()}[dim]Request failed — cannot reach {url}\n"
+                f"  Use [yellow]/url http://host:8000[/yellow] to change the backend "
+                f"or check your connection.\n"
+                f"  Your message is ready to resend.[/dim]"
             )
             continue
 

@@ -5,4 +5,5 @@ from kube_q.core.config import (  # noqa: F401
     Config,
     load_config,
     setup_logging,
+    validate_config,
 )
