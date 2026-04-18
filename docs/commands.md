@@ -29,12 +29,44 @@ The active namespace is shown in the prompt and injected into messages automatic
 
 ---
 
+## Kubernetes context
+
+| Command | Description |
+|---|---|
+| `/context <name>` | Set active kubectl context — prepended to every query as `[context: kube_context=X]` |
+| `/context` | Clear the active context |
+
+Context names Tab-complete from your kubeconfig (`kubectl config get-contexts`). If `kubectl` isn't installed, kube-q falls back to a minimal YAML scan of `~/.kube/config` or `$KUBECONFIG`.
+
+Set it at launch with `--context <name>` or `KUBE_Q_CONTEXT=<name>`.
+
+---
+
+## Profiles & plugins
+
+| Command | Description |
+|---|---|
+| `/profile` | List profiles in `~/.kube-q/profiles/` and show which one is active |
+| `/profile <name>` | Print the restart command for the named profile (profile switching requires a restart) |
+| `/plugins` | List slash commands registered by plugins in `~/.kube-q/plugins/` |
+
+Profiles are `.env` fragments that bundle backend + keys + kubectl context per environment — see [Configuration](configuration.md#profiles-per-cluster) for details. Plugins are Python files that register extra slash commands — see [Configuration](configuration.md#plugins).
+
+---
+
 ## Session history
 
 | Command | Description |
 |---|---|
-| `/sessions` | List the 20 most recent sessions (same as `kq --list`) |
+| `/sessions` | Open an interactive picker of the 20 most recent sessions — use **↑/↓** to navigate, **Enter** to resume in place (stored transcript is re-rendered **and the session's kube context is restored**), **Esc** to cancel |
+| `/resume` | Alias for `/sessions` |
+| `/history` | Replay messages in the **current** session on demand (all by default) |
+| `/history <N>` | Show the last **N** messages |
+| `/history <X-Y>` | Show messages **X** through **Y** (1-indexed, inclusive) |
+| `/history #<N>` | Show just message **#N** |
 | `/forget` | Delete the current session from local history (server-side data untouched) |
+
+Each replayed message is prefixed with `[#N]` so you can reference it — e.g. `/history #4` jumps straight to message 4.
 
 ---
 

@@ -121,8 +121,9 @@ Either:
 
 Yes. Every conversation is saved to a local SQLite database (`~/.kube-q/history.db`). Nothing is stored on the server.
 
-- List sessions: `kq --list` or `/sessions`
-- Resume a session: `kq --session-id <id>`
+- List sessions (table, exits): `kq --list`
+- Resume interactively: type `/sessions` (or `/resume`) in the REPL — arrow-key picker, Enter to resume in place, Esc to cancel; the stored transcript is replayed so you see the conversation before continuing
+- Resume by ID from the shell: `kq --session-id <id>` — also replays the stored transcript on launch
 - Search history: `kq --search "pod crash"` or `/search pod crash`
 
 ### Can I use kube-q in scripts and CI?

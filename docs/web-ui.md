@@ -33,6 +33,7 @@ Open `http://localhost:3000`. Each browser tab gets its own independent `kq` pro
 | `KUBE_Q_USER_NAME` | No | Display name shown in the prompt |
 | `PORT` | No | HTTP port (default: `3000`) |
 | `KUBE_Q_SKIP_HEALTH_CHECK` | No | Set `true` to skip startup health check |
+| `PTY_AUTH_TOKEN` | No | Require clients to supply this token on the WebSocket; when unset, auth is disabled |
 
 ### Build your own image
 
@@ -102,6 +103,39 @@ npm run start      # Next.js + PTY WebSocket on the same port
 ## Download conversation
 
 The toolbar has a **⬇ Download** button that exports the xterm.js scrollback buffer as a Markdown file directly to your browser — no server round-trip needed.
+
+---
+
+## Connection status & auto-reconnect
+
+A coloured status dot in the toolbar reflects the live WebSocket state:
+
+| Status | Meaning |
+|---|---|
+| `connecting…` | Opening the WebSocket for the first time |
+| `connected` | Byte relay is live |
+| `reconnecting — retry in Ns` | Unexpected close; counting down to the next attempt |
+| `ended` | Clean close (WebSocket code 1000) — the `kq` process exited |
+| `error` | Auth failure (1008) or max reconnect attempts reached |
+
+Unexpected disconnects trigger an exponential-backoff reconnect loop (up to 8 attempts, 1s → 15s) with inline "Reconnecting in Ns…" messages in the terminal. A clean close or auth failure stops the loop.
+
+---
+
+## Auth token gate
+
+To restrict who can spawn a `kq` process, set `PTY_AUTH_TOKEN` on the server:
+
+```bash
+docker run -p 3000:3000 \
+  -e KUBE_Q_URL=https://kube-q.example.com \
+  -e PTY_AUTH_TOKEN=$(openssl rand -hex 32) \
+  ghcr.io/mskazemi/kube_q:latest
+```
+
+Clients must supply the matching token via the `?token=` query parameter on the WebSocket URL. The frontend has a **🔑 Token** toolbar button that prompts for the token and stores it in `sessionStorage` (per-tab, cleared when the tab closes). A wrong or missing token is rejected with WebSocket close code `1008`, and the terminal shows an "Authentication failed" message with the token prompt re-opened.
+
+Leave `PTY_AUTH_TOKEN` unset for local development — the server logs `auth: disabled` and all connections are accepted.
 
 ---
 

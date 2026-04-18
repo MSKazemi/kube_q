@@ -13,7 +13,7 @@ kq [options]
 | `--url URL` | `http://localhost:8000` | kube-q API base URL (env: `KUBE_Q_URL`) |
 | `--query TEXT` / `-q TEXT` | — | Run a single query and exit (non-interactive) |
 | `--no-stream` | off | Disable streaming — wait for full response |
-| `--session-id ID` | — | Resume a previous session by ID (loads history from local store) |
+| `--session-id ID` | — | Resume a previous session by ID — loads history from the local store **and replays the stored transcript on launch** (user turns in green, assistant turns as markdown). For interactive picking use `/sessions` or `/resume` inside the REPL. |
 | `--list` | — | List recent sessions and exit |
 | `--search QUERY` | — | Full-text search across session history and exit |
 | `--user-id ID` | auto | Persistent user ID (saved to `~/.kube-q/user-id`) |
@@ -27,6 +27,24 @@ kq [options]
 | `--no-health-check` | off | Skip startup health-check retry loop (env: `KUBE_Q_SKIP_HEALTH_CHECK`) |
 | `--debug` / `--verbose` | off | Log raw HTTP requests/responses to stderr and `~/.kube-q/kube-q.log` |
 | `--version` | — | Print version and exit |
+
+### Backend selection
+
+| Flag | Default | Description |
+|---|---|---|
+| `--backend {kube-q,openai,azure}` | `kube-q` | Select the LLM backend (env: `KUBE_Q_BACKEND`) |
+| `--openai-api-key KEY` | — | OpenAI API key when `--backend openai` (env: `KUBE_Q_OPENAI_API_KEY`) |
+| `--openai-endpoint URL` | `https://api.openai.com` | Override OpenAI endpoint (env: `KUBE_Q_OPENAI_ENDPOINT`) |
+| `--azure-openai-api-key KEY` | — | Azure OpenAI API key (env: `KUBE_Q_AZURE_OPENAI_API_KEY`) |
+| `--azure-openai-endpoint URL` | — | Azure OpenAI resource URL (env: `KUBE_Q_AZURE_OPENAI_ENDPOINT`) |
+| `--azure-openai-deployment NAME` | — | Azure OpenAI deployment name (env: `KUBE_Q_AZURE_OPENAI_DEPLOYMENT`) |
+
+### Multi-cluster
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile NAME` | — | Load `~/.kube-q/profiles/<NAME>.env` on top of defaults (env: `KUBE_Q_PROFILE`) |
+| `--context NAME` | — | Set active kubectl context at launch (env: `KUBE_Q_CONTEXT`) |
 
 ---
 
@@ -49,6 +67,36 @@ kq --user-name Alice --agent-name KubeBot
 
 # Skip the startup health check (faster start when server is known-good)
 kq --no-health-check
+```
+
+### Backend selection
+
+```bash
+# Direct OpenAI — bypass the kube-q server entirely
+kq --backend openai --openai-api-key sk-...
+
+# Azure OpenAI — supply key, endpoint, and deployment name
+kq --backend azure \
+   --azure-openai-api-key    "$AZ_KEY" \
+   --azure-openai-endpoint   https://my-resource.openai.azure.com \
+   --azure-openai-deployment gpt-4o
+```
+
+The selected backend is fixed for the lifetime of the REPL — re-launch to switch. `/state` shows the active backend; the plain-HTTP warning is suppressed for `openai`/`azure`.
+
+### Multi-cluster
+
+```bash
+# Create a profile that bundles backend + keys + kubectl context
+kq config profile new prod
+# edit ~/.kube-q/profiles/prod.env, then:
+kq --profile prod
+
+# Pick a kubectl context at launch or flip it live inside the REPL
+kq --context prod-cluster
+# …or inside the REPL:
+/context staging-cluster
+/context                       # clear
 ```
 
 ### Single-query mode

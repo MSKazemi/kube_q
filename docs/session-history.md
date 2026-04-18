@@ -10,17 +10,61 @@ kube-q saves every conversation to a local SQLite database at `~/.kube-q/history
 kq --list
 ```
 
-Shows the 20 most recent sessions with ID, title, message count, token total, and last-used time. Inside the REPL, `/sessions` does the same.
+Shows the 20 most recent sessions with ID, title, message count, token total, and last-used time (non-interactive table, exits after printing).
 
 ---
 
 ## Resuming a session
 
+### From the REPL — interactive picker
+
+```
+/sessions       (or /resume)
+```
+
+Opens a full-screen picker of the 20 most recent sessions. Use **↑/↓** to navigate, **Enter** to resume the highlighted session in place, **Esc** to cancel. Each row shows `updated · title · msg count · tokens · namespace · short id`.
+
+On selection, kube-q:
+
+1. Swaps the active conversation ID.
+2. Hydrates the full message history from `~/.kube-q/history.db`.
+3. Re-renders the stored transcript (user turns in green, assistant turns as markdown, separated by a rule showing the message count) so you see the whole conversation before continuing.
+4. **Restores the kube context** that was active when the session was last used — so you're automatically pointed back at the same cluster. A dim `Context restored to …` line confirms it. Override any time with `/context <name>`.
+5. Clears any pending HITL flag — you're ready to send the next message.
+
+!!! tip "Picker shows the context"
+    Each row in the picker and `kq --list` table now includes the session's kube context (`ctx=prod-cluster`) so you can tell at a glance which cluster a session was working against.
+
+No restart is required. The picker renders identically in the web UI because the browser is a pure PTY relay to the `kq` process.
+
+### From the shell — by session ID
+
 ```bash
 kq --session-id <id>
 ```
 
-Loads the full message history for that session and continues the conversation from where you left off. The session ID is shown in `kq --list` output.
+Launches kube-q directly into the chosen session. The stored transcript is replayed at startup the same way it is in the REPL picker, and the stored kube context is restored onto `state.current_context` so the next message is routed to the same cluster. The session ID is shown in `kq --list` output. If you pass `--context <name>` explicitly on the command line, your flag wins over the stored value.
+
+---
+
+## Replaying the current session on demand
+
+```
+/history              # all messages
+/history <N>          # last N messages
+/history <X-Y>        # messages X through Y (1-indexed, inclusive)
+/history #<N>         # just message #N
+```
+
+Useful when the transcript has scrolled off the top of the terminal, or when you want to quote a specific earlier exchange. Every line is prefixed with a `[#N]` marker so you can jump back by number:
+
+```
+/history 5            # review the last 5 turns
+/history 1-4          # re-read the opening exchange
+/history #7           # pull back just assistant message #7
+```
+
+Malformed or out-of-range specs print a usage hint — no state is changed. `/history` operates purely on the session already in memory; it does not hit the database.
 
 ---
 

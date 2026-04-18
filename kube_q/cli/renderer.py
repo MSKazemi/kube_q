@@ -261,7 +261,7 @@ def _print_sessions_table(sessions: list[dict]) -> None:
         return
 
     table = Table(
-        "Session ID", "Title", "Messages", "Tokens", "Namespace", "Updated",
+        "Session ID", "Title", "Messages", "Tokens", "Namespace", "Context", "Updated",
         title="[bold cyan]Recent Sessions[/bold cyan]",
         border_style="dim cyan",
         show_lines=False,
@@ -269,6 +269,7 @@ def _print_sessions_table(sessions: list[dict]) -> None:
     for s in sessions:
         title = s["title"] or "[dim](untitled)[/dim]"
         ns = s["namespace"] or "[dim]—[/dim]"
+        ctx = s.get("kube_context") or "[dim]—[/dim]"
         updated = s["updated_at"][:19].replace("T", " ") if s["updated_at"] else "—"
         total_tok = s.get("total_tokens", 0)
         tok_str = f"{total_tok:,}" if total_tok else "[dim]—[/dim]"
@@ -278,6 +279,7 @@ def _print_sessions_table(sessions: list[dict]) -> None:
             str(s["message_count"]),
             tok_str,
             ns,
+            ctx,
             updated,
         )
     console.print(table)
@@ -356,7 +358,7 @@ def _fmt_help() -> None:
 
         # ── Editing shortcuts ─────────────────────────────────────────────────
         "[bold cyan]Editing[/bold cyan]\n\n"
-        "  [yellow]Tab[/yellow]                Auto-complete slash commands\n"
+        "  [yellow]Tab[/yellow]                Auto-complete slash commands  [dim](suggestions also pop up as you type)[/dim]\n"  # noqa: E501
         "  [yellow]↑ / ↓[/yellow]             Scroll through previous messages  [dim](history)[/dim]\n"  # noqa: E501
         "  [yellow]Ctrl+A[/yellow]             Jump to start of line\n"
         "  [yellow]Ctrl+E[/yellow]             Jump to end of line\n"
@@ -371,12 +373,13 @@ def _fmt_help() -> None:
         "  [yellow]/id[/yellow]                Show the current conversation ID\n"
         "  [yellow]/state[/yellow]             Show full session state  [dim](ID, namespace, HITL flag)[/dim]\n"  # noqa: E501
         "  [yellow]/save[/yellow]              Save conversation to [dim]kube-q-TIMESTAMP.md[/dim]\n"  # noqa: E501
-        "  [yellow]/save <file>[/yellow]        Save conversation to a specific file\n\n"
+        "  [yellow]/save <file>[/yellow]        Save conversation to a specific file  [dim](Tab completes paths)[/dim]\n\n"  # noqa: E501
 
         # ── Namespace ─────────────────────────────────────────────────────────
         "[bold cyan]Namespace[/bold cyan]\n\n"
         "  [yellow]/ns <name>[/yellow]          Set active namespace — prepended to every query\n"
-        "  [yellow]/ns[/yellow]                 Clear active namespace\n\n"
+        "  [yellow]/ns[/yellow]                 Clear active namespace\n"
+        "  [dim]Tab-completes namespaces from the cluster (cached after first use).[/dim]\n\n"
 
         # ── Kubernetes context ────────────────────────────────────────────────
         "[bold cyan]Kubernetes context[/bold cyan]\n\n"
@@ -386,15 +389,35 @@ def _fmt_help() -> None:
 
         # ── Profiles & plugins ────────────────────────────────────────────────
         "[bold cyan]Profiles & plugins[/bold cyan]\n\n"
-        "  [yellow]/profile[/yellow]            List available profiles in ~/.kube-q/profiles/\n"
-        "  [yellow]/profile <name>[/yellow]     Show restart command for a named profile  [dim](switching requires restart)[/dim]\n"  # noqa: E501
-        "  [yellow]/plugins[/yellow]            List loaded plugins from ~/.kube-q/plugins/\n"
+        "  [yellow]/profile[/yellow]                 List available profiles in ~/.kube-q/profiles/\n"  # noqa: E501
+        "  [yellow]/profile new <name>[/yellow]      Create a new profile .env from template\n"
+        "  [yellow]/profile show <name>[/yellow]     Print a profile's contents\n"
+        "  [yellow]/profile delete <name>[/yellow]   Delete a profile file\n"
+        "  [yellow]/profile <name>[/yellow]          Show restart command to activate a profile  [dim](switching requires restart)[/dim]\n"  # noqa: E501
+        "  [yellow]/plugins[/yellow]                 List loaded plugins from ~/.kube-q/plugins/\n"
         "  [dim]Profiles are .env fragments per cluster; plugins register extra slash commands.[/dim]\n\n"  # noqa: E501
+
+        # ── Config ────────────────────────────────────────────────────────────
+        "[bold cyan]Config[/bold cyan]\n\n"
+        "  [yellow]/config[/yellow]                  Print effective config with each value's source\n"  # noqa: E501
+        "  [yellow]/config set KEY=VAL[/yellow]      Persist a value to ~/.kube-q/.env  [dim](validated)[/dim]\n"  # noqa: E501
+        "  [yellow]/config reset KEY[/yellow]        Remove a single key from ~/.kube-q/.env\n"
+        "  [yellow]/config reset[/yellow]            Delete ~/.kube-q/.env entirely\n"
+        "  [dim]KEY accepts the env var (KUBE_Q_URL) or its alias (url).[/dim]\n\n"
 
         # ── Session history ───────────────────────────────────────────────────
         "[bold cyan]Session history[/bold cyan]\n\n"
-        "  [yellow]/sessions[/yellow]           List recent sessions  "
-        "[dim](same as kq --list)[/dim]\n"
+        "  [yellow]/sessions[/yellow]           Pick a past session to resume  "
+        "[dim](↑/↓ navigate, Enter resume, Esc cancel; kube context restored)[/dim]\n"
+        "  [yellow]/resume[/yellow]             Alias for [yellow]/sessions[/yellow]\n"
+        "  [yellow]/list[/yellow]               Print recent sessions as a table  "
+        "[dim](no picker — same data as[/dim] [yellow]kq --list[/yellow][dim])[/dim]\n"
+        "  [yellow]/history[/yellow]            Replay messages in the current session  "
+        "[dim](no args = all)[/dim]\n"
+        "  [yellow]/history <N>[/yellow]        Show the last [bold]N[/bold] messages\n"
+        "  [yellow]/history <X-Y>[/yellow]      Show messages [bold]X[/bold] through [bold]Y[/bold]  "
+        "[dim](1-indexed, inclusive)[/dim]\n"
+        "  [yellow]/history #<N>[/yellow]       Show just message [bold]#N[/bold]\n"
         "  [yellow]/forget[/yellow]             Delete current session from local history  "
         "[dim](server data untouched)[/dim]\n\n"
 
@@ -426,6 +449,7 @@ def _fmt_help() -> None:
         # ── Terminal ──────────────────────────────────────────────────────────
         "[bold cyan]Terminal[/bold cyan]\n\n"
         "  [yellow]/url[/yellow] [dim][new-url][/dim]        Show or change the backend URL  [dim](saves to ~/.kube-q/.env)[/dim]\n"  # noqa: E501
+        "  [yellow]/version[/yellow]            Print the installed kube-q version\n"
         "  [yellow]/clear[/yellow]              Clear the terminal screen\n"
         "  [yellow]/help[/yellow]               Show this help\n"
         "  [yellow]/quit[/yellow]  [dim]/exit  /q[/dim]   Exit kube-q\n\n"
@@ -445,7 +469,7 @@ def _fmt_help() -> None:
         "  [dim]kq --list[/dim]                    List recent sessions and exit\n"
         "  [dim]kq --search \"...[/dim]\"             Full-text search across session "
         "history and exit\n"
-        "  [dim]kq --session-id <id>[/dim]         Resume a previous session by ID\n"
+        "  [dim]kq --session-id <id>[/dim]         Resume a previous session by ID  [dim](replays stored transcript on launch)[/dim]\n"  # noqa: E501
         "  [dim]kq --model <name>[/dim]            Override model name sent in requests\n"
         "  [dim]kq --user-name <name>[/dim]        Your display name in the prompt  [dim](default: You)[/dim]\n"  # noqa: E501
         "  [dim]kq --agent-name <name>[/dim]       Assistant name in saved files  [dim](default: kube-q)[/dim]\n"  # noqa: E501

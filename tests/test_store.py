@@ -273,9 +273,9 @@ def test_migration_v1_to_v2_creates_token_log(
     rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     tables = {row[0] for row in rows}
     assert "token_log" in tables
-    # user_version must be 3 (v1→v2→v3 all run in sequence)
+    # user_version must be 4 (v1→v2→v3→v4 all run in sequence)
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 3
+    assert version == 4
     conn.close()
 
 
@@ -297,11 +297,11 @@ def test_migration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     """Calling get_db() multiple times on a fully migrated database must not fail."""
     db_path = tmp_path / "idempotent.db"
     monkeypatch.setattr(store_mod, "DB_PATH", db_path)
-    store_mod.get_db().close()  # first call: v0 → v3
-    store_mod.get_db().close()  # second call: already v3, no-op
+    store_mod.get_db().close()  # first call: v0 → v4
+    store_mod.get_db().close()  # second call: already v4, no-op
     conn = store_mod.get_db()   # third call
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 3
+    assert version == 4
     conn.close()
 
 
@@ -473,7 +473,7 @@ def test_migration_v2_to_v3_adds_fts_table(tmp_path: Path, monkeypatch: pytest.M
     tables = {row[0] for row in rows}
     assert "messages_fts" in tables
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 3
+    assert version == 4
     conn.close()
 
 
@@ -543,6 +543,114 @@ def test_migration_v2_to_v3_backfills_fts(tmp_path: Path, monkeypatch: pytest.Mo
     results = search_sessions("crash")
     session_ids = {r["session_id"] for r in results}
     assert session_ids == {"s1"}
+
+
+# ── Schema migration v3 → v4 (kube_context column) ────────────────────────────
+
+
+def _make_v3_db(path: Path) -> None:
+    """Create a v3-format database (user_version=3, no kube_context column)."""
+    conn = sqlite3.connect(str(path))
+    conn.executescript("""
+        CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY,
+            user       TEXT NOT NULL,
+            title      TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            namespace  TEXT,
+            total_prompt_tokens     INTEGER DEFAULT 0,
+            total_completion_tokens INTEGER DEFAULT 0,
+            parent_session_id TEXT,
+            branch_point INTEGER
+        );
+        CREATE TABLE messages (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role       TEXT NOT NULL,
+            content    TEXT NOT NULL,
+            request_id TEXT,
+            created_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+
+
+def test_migration_v3_to_v4_adds_kube_context_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "v3_to_v4.db"
+    _make_v3_db(db_path)
+    monkeypatch.setattr(store_mod, "DB_PATH", db_path)
+
+    conn = store_mod.get_db()
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    assert "kube_context" in cols
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version == 4
+    conn.close()
+
+
+def test_migration_v3_to_v4_preserves_existing_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v3 sessions must survive the migration with kube_context defaulting to NULL."""
+    db_path = tmp_path / "v3_preserve.db"
+    _make_v3_db(db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "INSERT INTO sessions VALUES "
+        "('s-old', 'u', 'Old session', '2026-01-01', '2026-01-01', 'default', 0, 0, NULL, NULL)"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(store_mod, "DB_PATH", db_path)
+
+    meta = store_mod.load_session_meta("s-old")
+    assert meta is not None
+    assert meta["title"] == "Old session"
+    assert meta["kube_context"] is None
+
+
+# ── kube_context roundtrip ────────────────────────────────────────────────────
+
+
+def test_upsert_session_persists_kube_context() -> None:
+    upsert_session("sess-ctx", "u", "default", kube_context="prod-cluster")
+    meta = store_mod.load_session_meta("sess-ctx")
+    assert meta is not None
+    assert meta["kube_context"] == "prod-cluster"
+
+
+def test_upsert_session_updates_kube_context() -> None:
+    upsert_session("sess-ctx", "u", "default", kube_context="prod-cluster")
+    upsert_session("sess-ctx", "u", "default", kube_context="staging")
+    assert store_mod.load_session_meta("sess-ctx")["kube_context"] == "staging"
+
+
+def test_upsert_session_clears_kube_context_when_none() -> None:
+    upsert_session("sess-ctx", "u", "default", kube_context="prod-cluster")
+    upsert_session("sess-ctx", "u", "default", kube_context=None)
+    assert store_mod.load_session_meta("sess-ctx")["kube_context"] is None
+
+
+def test_upsert_session_defaults_kube_context_to_none() -> None:
+    upsert_session("sess-no-ctx", "u", "default")
+    assert store_mod.load_session_meta("sess-no-ctx")["kube_context"] is None
+
+
+def test_list_sessions_includes_kube_context() -> None:
+    upsert_session("s-prod", "u", None, kube_context="prod")
+    upsert_session("s-dev",  "u", None, kube_context="dev")
+    rows = {r["session_id"]: r["kube_context"] for r in list_sessions()}
+    assert rows["s-prod"] == "prod"
+    assert rows["s-dev"] == "dev"
+
+
+def test_load_session_meta_returns_none_for_missing_id() -> None:
+    assert store_mod.load_session_meta("no-such-session") is None
 
 
 # ── search_sessions ───────────────────────────────────────────────────────────

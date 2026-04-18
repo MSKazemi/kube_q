@@ -10,6 +10,7 @@ Schema versions
 v0 → v1  Initial schema: sessions + messages tables.
 v1 → v2  Token tracking: token_log table + total_*_tokens columns on sessions.
 v2 → v3  FTS5 full-text search index + branch columns on sessions.
+v3 → v4  Per-session kubectl context: sessions.kube_context column.
 """
 
 import logging
@@ -134,6 +135,16 @@ def _migrate_to_v3(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_to_v4(conn: sqlite3.Connection) -> None:
+    """Apply v3 → v4 migration: add kube_context column on sessions."""
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN kube_context TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists (partial migration or re-run)
+    conn.execute("PRAGMA user_version = 4")
+    conn.commit()
+
+
 # ── Connection factory ────────────────────────────────────────────────────────
 
 def get_db() -> sqlite3.Connection:
@@ -142,6 +153,8 @@ def get_db() -> sqlite3.Connection:
     Versions are tracked with PRAGMA user_version:
       0 → 1  Create base sessions + messages tables.
       1 → 2  Add token_log table + total_*_tokens columns on sessions.
+      2 → 3  Add FTS5 index on messages + branch columns on sessions.
+      3 → 4  Add kube_context column on sessions.
     """
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
@@ -163,6 +176,10 @@ def get_db() -> sqlite3.Connection:
 
     if version == 2:
         _migrate_to_v3(conn)
+        version = 3
+
+    if version == 3:
+        _migrate_to_v4(conn)
 
     return conn
 
@@ -181,24 +198,47 @@ def _db() -> Generator[sqlite3.Connection, None, None]:
 
 # ── Session operations ────────────────────────────────────────────────────────
 
-def upsert_session(session_id: str, user: str, namespace: str | None) -> None:
-    """INSERT OR IGNORE on session_id, then UPDATE updated_at and namespace."""
+def upsert_session(
+    session_id: str,
+    user: str,
+    namespace: str | None,
+    kube_context: str | None = None,
+) -> None:
+    """INSERT OR IGNORE on session_id, then UPDATE updated_at, namespace, kube_context."""
     try:
         with _db() as conn:
             now = _now()
             conn.execute(
                 "INSERT OR IGNORE INTO sessions "
-                "(session_id, user, created_at, updated_at, namespace) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (session_id, user, now, now, namespace),
+                "(session_id, user, created_at, updated_at, namespace, kube_context) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, user, now, now, namespace, kube_context),
             )
             conn.execute(
-                "UPDATE sessions SET updated_at = ?, namespace = ? WHERE session_id = ?",
-                (now, namespace, session_id),
+                "UPDATE sessions "
+                "SET updated_at = ?, namespace = ?, kube_context = ? "
+                "WHERE session_id = ?",
+                (now, namespace, kube_context, session_id),
             )
             conn.commit()
     except sqlite3.Error as exc:
         _logger.warning("store.upsert_session failed: %s", exc)
+
+
+def load_session_meta(session_id: str) -> dict | None:
+    """Return session metadata (namespace, kube_context, title, …) or None if absent."""
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT session_id, user, title, created_at, updated_at, "
+                "namespace, kube_context "
+                "FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as exc:
+        _logger.warning("store.load_session_meta failed: %s", exc)
+        return None
 
 
 def set_session_title(session_id: str, title: str) -> None:
@@ -227,7 +267,7 @@ def delete_session(session_id: str) -> None:
 def list_sessions(limit: int = 20) -> list[dict]:
     """Return up to *limit* sessions ordered by updated_at DESC.
 
-    Each dict includes: session_id, title, updated_at, namespace,
+    Each dict includes: session_id, title, updated_at, namespace, kube_context,
     message_count, total_prompt_tokens, total_completion_tokens, total_tokens.
     """
     try:
@@ -235,6 +275,7 @@ def list_sessions(limit: int = 20) -> list[dict]:
             rows = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.updated_at, s.namespace,
+                       s.kube_context,
                        COUNT(m.id) AS message_count,
                        COALESCE(s.total_prompt_tokens, 0)     AS total_prompt_tokens,
                        COALESCE(s.total_completion_tokens, 0) AS total_completion_tokens

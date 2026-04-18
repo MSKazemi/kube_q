@@ -5,6 +5,7 @@ repl.py — prompt_toolkit REPL loop and slash command dispatch for the kube_q C
 import datetime
 import difflib
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -12,16 +13,22 @@ from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion, WordCompleter
+from prompt_toolkit.completion import Completer, Completion, PathCompleter
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.shortcuts import radiolist_dialog
+from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.spinner import Spinner
+from rich.rule import Rule
 from rich.text import Text
 
 from kube_q import costs, plugins, store
+from kube_q.cli import config_cmd as _config_cmd
 from kube_q.cli.renderer import (
     _fmt_help,
     _print_logo,
@@ -86,13 +93,37 @@ class ReplConfig:
 
 # ── Prompt session config ─────────────────────────────────────────────────────
 
-_SLASH_COMMANDS = [
-    "/new", "/id", "/state", "/clear", "/save", "/approve", "/deny",
-    "/help", "/ns", "/sessions", "/forget", "/tokens", "/cost",
-    "/search", "/branch", "/branches", "/title", "/url",
-    "/context", "/profile", "/plugins",
-    "/quit", "/exit", "/q",
-]
+_SLASH_COMMANDS: dict[str, str] = {
+    "/new": "start a new conversation",
+    "/id": "show current conversation ID",
+    "/state": "show current session state",
+    "/clear": "clear the terminal screen",
+    "/save": "save conversation to a markdown file",
+    "/approve": "approve a pending HITL action",
+    "/deny": "deny a pending HITL action",
+    "/help": "show all commands",
+    "/ns": "set or clear the active namespace",
+    "/sessions": "pick a past session to resume (arrow keys)",
+    "/resume": "alias for /sessions",
+    "/list": "table of recent sessions (no picker)",
+    "/history": "show messages in the current session (optional: N | X-Y | #N)",
+    "/forget": "delete current session from local history",
+    "/tokens": "show token counts and estimated cost",
+    "/cost": "alias for /tokens",
+    "/search": "full-text search across past sessions",
+    "/branch": "fork this conversation at the current point",
+    "/branches": "list all forks of this session",
+    "/title": "rename the current session",
+    "/url": "show or change the API URL",
+    "/context": "set or clear the kubectl context",
+    "/profile": "profile management (list / new / show / delete)",
+    "/config": "show / set / reset ~/.kube-q/.env keys",
+    "/version": "show kube-q version",
+    "/plugins": "list loaded plugin commands",
+    "/quit": "exit kube-q",
+    "/exit": "exit kube-q",
+    "/q": "exit kube-q",
+}
 _HISTORY_FILE = str(CONFIG_DIR / "history")
 
 
@@ -109,21 +140,43 @@ def _update_env_url(new_url: str) -> None:
 class _KqCompleter(Completer):
     """Tab-completer for slash commands with argument-aware suggestions.
 
-    Defers to a plain WordCompleter for the command itself, then switches to
-    a context-specific list once the user types ``/context <TAB>`` or
-    ``/profile <TAB>``. Unknown contexts fall through to no suggestions.
+    Shows command names with inline descriptions, then switches to a
+    context-specific list once an argument is being typed:
+        /context <TAB>  → kubectl contexts
+        /profile <TAB>  → ~/.kube-q/profiles/*.env
+        /ns <TAB>       → cluster namespaces (lazily fetched, cached)
+        /save <TAB>     → filesystem path completion
+    Unknown commands fall through to no suggestions. Argument matching is
+    case-insensitive and accepts substrings.
     """
 
     def __init__(
         self,
         contexts: list[str] | None = None,
         profiles: list[str] | None = None,
-        extra_commands: list[str] | None = None,
+        extra_commands: dict[str, str] | None = None,
+        namespaces_provider: Any = None,
     ) -> None:
-        self._commands = list(_SLASH_COMMANDS) + list(extra_commands or [])
-        self._contexts = contexts or []
-        self._profiles = profiles or []
-        self._cmd_completer = WordCompleter(self._commands, sentence=False)
+        self._commands: dict[str, str] = dict(_SLASH_COMMANDS)
+        if extra_commands:
+            for name, desc in extra_commands.items():
+                self._commands.setdefault(name, desc or "plugin command")
+        self._contexts = sorted(contexts or [])
+        self._profiles = sorted(profiles or [])
+        self._namespaces_provider = namespaces_provider
+        self._ns_cache: list[str] | None = None
+        self._path_completer = PathCompleter(expanduser=True)
+
+    def _namespaces(self) -> list[str]:
+        if self._ns_cache is None:
+            if self._namespaces_provider is None:
+                self._ns_cache = []
+            else:
+                try:
+                    self._ns_cache = sorted(self._namespaces_provider() or [])
+                except Exception:
+                    self._ns_cache = []
+        return self._ns_cache
 
     def get_completions(self, document: Any, complete_event: Any) -> Any:
         text = document.text_before_cursor
@@ -132,21 +185,44 @@ class _KqCompleter(Completer):
             return
         parts = text.split(maxsplit=1)
         if len(parts) == 1 and not text.endswith(" "):
-            # Still typing the command itself
-            yield from self._cmd_completer.get_completions(document, complete_event)
+            # Still typing the command name itself.
+            prefix = text.lower()
+            for name, desc in self._commands.items():
+                if name.startswith(prefix):
+                    yield Completion(
+                        name,
+                        start_position=-len(text),
+                        display=name,
+                        display_meta=desc,
+                    )
             return
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
-        choices: list[str] = []
+        if cmd == "/save":
+            sub = Document(text=arg, cursor_position=len(arg))
+            yield from self._path_completer.get_completions(sub, complete_event)
+            return
         if cmd == "/context":
-            choices = self._contexts
+            choices, label = self._contexts, "context"
         elif cmd == "/profile":
-            choices = self._profiles
+            choices, label = self._profiles, "profile"
+        elif cmd == "/ns":
+            choices, label = self._namespaces(), "namespace"
         else:
             return
+        arg_l = arg.lower()
+        # Prefix matches first, then substring matches (so typing-as-you-go feels right).
+        seen: set[str] = set()
         for choice in choices:
-            if choice.startswith(arg):
-                yield Completion(choice, start_position=-len(arg))
+            if choice.lower().startswith(arg_l):
+                seen.add(choice)
+                yield Completion(choice, start_position=-len(arg), display_meta=label)
+        if arg_l:
+            for choice in choices:
+                if choice in seen:
+                    continue
+                if arg_l in choice.lower():
+                    yield Completion(choice, start_position=-len(arg), display_meta=label)
 
 
 def _list_profiles() -> list[str]:
@@ -160,7 +236,8 @@ def _list_profiles() -> list[str]:
 def _make_prompt_session(
     contexts: list[str] | None = None,
     profiles: list[str] | None = None,
-    extra_commands: list[str] | None = None,
+    extra_commands: dict[str, str] | None = None,
+    namespaces_provider: Any = None,
 ) -> PromptSession:
     """Return a PromptSession with chat-style key bindings.
 
@@ -180,12 +257,15 @@ def _make_prompt_session(
         event.current_buffer.insert_text("\n")
 
     completer = _KqCompleter(
-        contexts=contexts, profiles=profiles, extra_commands=extra_commands,
+        contexts=contexts,
+        profiles=profiles,
+        extra_commands=extra_commands,
+        namespaces_provider=namespaces_provider,
     )
     return PromptSession(
         history=FileHistory(_HISTORY_FILE),
         completer=completer,
-        complete_while_typing=False,
+        complete_while_typing=True,
         multiline=True,
         key_bindings=kb,
     )
@@ -210,6 +290,206 @@ def _save_conversation(
     with open(path, "w") as f:
         f.write("\n".join(lines))
     console.print(f"[dim]Conversation saved to[/dim] {path}")
+
+
+# ── Interactive session picker ────────────────────────────────────────────────
+
+_PICKER_STYLE = PTStyle.from_dict({
+    "dialog":             "bg:#1e1e2e",
+    "dialog frame.label": "bg:#1e1e2e #89b4fa bold",
+    "dialog.body":        "bg:#1e1e2e #cdd6f4",
+    "dialog shadow":      "bg:#11111b",
+    "radio-selected":     "#a6e3a1 bold",
+    "radio":              "#cdd6f4",
+    "button":             "bg:#313244 #cdd6f4",
+    "button.focused":     "bg:#89b4fa #1e1e2e bold",
+})
+
+
+def _format_session_row(s: dict) -> str:
+    """One-line label for a session row in the picker."""
+    title = s["title"] or "(untitled)"
+    if len(title) > 40:
+        title = title[:37] + "…"
+    updated = (s["updated_at"] or "")[:16].replace("T", " ")
+    msgs = s["message_count"]
+    tok = s.get("total_tokens") or 0
+    ns = s["namespace"] or "—"
+    ctx = s.get("kube_context") or "—"
+    sid = s["session_id"][:8]
+    tok_str = f"{tok:,}t" if tok else "—"
+    return (
+        f"{updated}  {title:<40}  msgs={msgs:<3} {tok_str:<7}  "
+        f"ns={ns:<12} ctx={ctx:<16} [{sid}]"
+    )
+
+
+def _pick_session_interactive(limit: int = 20) -> str | None:
+    """Show an arrow-key picker of recent sessions; return session_id or None."""
+    sessions = store.list_sessions(limit)
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return None
+
+    values = [(s["session_id"], _format_session_row(s)) for s in sessions]
+    try:
+        result = radiolist_dialog(
+            title="Resume a session",
+            text="↑/↓ to navigate · Enter to resume · Esc to cancel",
+            values=values,
+            default=values[0][0],
+            style=_PICKER_STYLE,
+        ).run()
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[yellow]Picker unavailable ({exc}). Showing table instead.[/yellow]")
+        _print_sessions_table(sessions)
+        return None
+    return result
+
+
+def _resume_session(
+    state: SessionState,
+    session_id: str,
+    user_name: str = "You",
+    agent_name: str = "kube-q",
+) -> bool:
+    """Swap state to `session_id`, hydrating messages from the local store
+    and re-rendering the stored transcript (same as ``kq --session-id``).
+
+    Returns True if the switch happened, False on no-op or failure.
+    """
+    if session_id == state.conversation_id:
+        console.print("[dim]Already on this session — no change.[/dim]")
+        return False
+    stored = store.load_messages(session_id)
+    meta = store.load_session_meta(session_id) or {}
+    state.conversation_id = session_id
+    state.messages = stored
+    state.hitl_pending = False
+    state.pending_action_id = None
+    prior_ctx = state.current_context
+    stored_ctx = meta.get("kube_context")
+    if stored_ctx:
+        state.current_context = stored_ctx
+    console.print(
+        f"[dim]Resumed session[/dim] [bold]{session_id[:8]}[/bold]"
+    )
+    if stored_ctx and stored_ctx != prior_ctx:
+        console.print(
+            f"[dim]Context restored to[/dim] [bold]{stored_ctx}[/bold]"
+        )
+    _replay_history(stored, user_name=user_name, agent_name=agent_name)
+    return True
+
+
+# ── History replay ────────────────────────────────────────────────────────────
+
+# Matches `[context: foo=bar] ` prefixes that the REPL prepends to outgoing
+# user turns (namespace + kube_context). Stripped for display only.
+_CONTEXT_PREFIX_RE = re.compile(r"^(?:\[context:[^\]]*\]\s*)+")
+
+
+def _render_message(msg: dict, index: int, user_name: str, agent_name: str) -> None:
+    """Print a single stored message with a 1-indexed `[#N]` prefix."""
+    role = msg.get("role")
+    content = msg.get("content", "")
+    marker = f"[dim]\\[#{index}][/dim] "
+    if role == "user":
+        display = _CONTEXT_PREFIX_RE.sub("", content)
+        console.print(f"{marker}[bold green]{user_name}:[/bold green] {display}")
+    elif role == "assistant":
+        console.print(f"{marker}[bold cyan]{agent_name}:[/bold cyan]")
+        console.print(Markdown(content))
+    else:
+        console.print(f"{marker}[dim]{role}:[/dim] {content}")
+
+
+def _replay_history(
+    messages: list[dict],
+    user_name: str,
+    agent_name: str,
+) -> None:
+    """Re-render stored messages so a resumed session shows its prior turns."""
+    if not messages:
+        return
+    console.print(
+        Rule(f"[dim]Resumed {len(messages)} messages[/dim]", style="dim")
+    )
+    for i, msg in enumerate(messages, start=1):
+        _render_message(msg, i, user_name, agent_name)
+    console.print(Rule(style="dim"))
+
+
+def _parse_history_spec(spec: str, total: int) -> tuple[int, int] | None:
+    """Parse `/history` arg → inclusive (start, end) 1-indexed slice.
+
+    Accepts: ""/whitespace (all), "N" (last N), "X-Y" (range), "#N" (just N).
+    Returns None when the spec is malformed or out of range.
+    """
+    spec = spec.strip()
+    if not spec:
+        return (1, total)
+    if spec.startswith("#") or spec.startswith("@"):
+        try:
+            n = int(spec[1:])
+        except ValueError:
+            return None
+        if not (1 <= n <= total):
+            return None
+        return (n, n)
+    if "-" in spec:
+        lo_s, _, hi_s = spec.partition("-")
+        try:
+            lo, hi = int(lo_s), int(hi_s)
+        except ValueError:
+            return None
+        if lo < 1 or hi > total or lo > hi:
+            return None
+        return (lo, hi)
+    try:
+        n = int(spec)
+    except ValueError:
+        return None
+    if n < 1:
+        return None
+    n = min(n, total)
+    return (total - n + 1, total)
+
+
+def _print_history(
+    messages: list[dict],
+    arg: str,
+    user_name: str,
+    agent_name: str,
+) -> None:
+    """Handle `/history [N | X-Y | #N]` — render the requested slice."""
+    total = len(messages)
+    if total == 0:
+        console.print("[dim]No messages in this session yet.[/dim]")
+        return
+    window = _parse_history_spec(arg, total)
+    if window is None:
+        console.print(
+            "[yellow]Usage:[/yellow] /history                 "
+            "[dim]# all messages[/dim]\n"
+            "        /history [bold]N[/bold]              "
+            "[dim]# last N messages[/dim]\n"
+            "        /history [bold]X-Y[/bold]          "
+            "[dim]# messages X through Y (1-indexed)[/dim]\n"
+            "        /history [bold]#N[/bold]            "
+            "[dim]# just message #N[/dim]"
+        )
+        return
+    lo, hi = window
+    count = hi - lo + 1
+    header = (
+        f"[dim]Message #{lo} of {total}[/dim]" if count == 1
+        else f"[dim]Messages {lo}–{hi} of {total}[/dim]"
+    )
+    console.print(Rule(header, style="dim"))
+    for i in range(lo, hi + 1):
+        _render_message(messages[i - 1], i, user_name, agent_name)
+    console.print(Rule(style="dim"))
 
 
 # ── REPL ──────────────────────────────────────────────────────────────────────
@@ -255,14 +535,31 @@ def run_repl(cfg: ReplConfig) -> None:
 
     # ── Load user plugins (best-effort) ───────────────────────────────────────
     loaded_plugins = plugins.load_plugins()
-    plugin_cmds = list(plugins.registered_commands().keys())
+    plugin_cmds: dict[str, str] = {
+        name: (help_text or "plugin command")
+        for name, (_fn, help_text) in plugins.registered_commands().items()
+    }
 
     # Hydrate from store when resuming a named session
     if initial_session_id and not initial_messages:
         stored = store.load_messages(initial_session_id)
         if stored:
             state.messages = stored
-            console.print(f"[dim]Resumed {len(stored)} messages.[/dim]")
+            _replay_history(stored, user_name=user_name, agent_name=agent_name)
+        else:
+            console.print(
+                f"[dim]No stored history for session {initial_session_id}.[/dim]"
+            )
+        # Restore stored kube_context only when the user didn't explicitly
+        # pass --context on the command line (explicit CLI flag wins).
+        if not cfg.kube_context:
+            meta = store.load_session_meta(initial_session_id) or {}
+            if meta.get("kube_context"):
+                state.current_context = meta["kube_context"]
+                console.print(
+                    f"[dim]Restored kube context[/dim] "
+                    f"[bold]{state.current_context}[/bold] [dim]from session.[/dim]"
+                )
     _prepend_ns_once = False
     _pending_retry: str = ""  # pre-fills next prompt after a failed send
 
@@ -353,10 +650,18 @@ def run_repl(cfg: ReplConfig) -> None:
         _kube_contexts = list_contexts()
     except Exception:
         _kube_contexts = []
+
+    def _namespaces_provider() -> list[str]:
+        return fetch_namespaces(
+            url, resolved_user_id, api_key=api_key,
+            ca_cert=ca_cert, timeout=namespace_timeout,
+        ) or []
+
     pt_session = _make_prompt_session(
         contexts=_kube_contexts,
         profiles=_list_profiles(),
         extra_commands=plugin_cmds,
+        namespaces_provider=_namespaces_provider,
     )
 
     while True:
@@ -500,33 +805,90 @@ def run_repl(cfg: ReplConfig) -> None:
             continue
 
         if user_input.lower().startswith("/profile"):
-            parts = user_input.split(maxsplit=1)
-            prof_arg = parts[1].strip() if len(parts) > 1 else ""
-            profiles_here = _list_profiles()
-            if not prof_arg:
+            parts = user_input.split(maxsplit=2)
+            sub = parts[1].strip().lower() if len(parts) > 1 else ""
+            sub_arg = parts[2].strip() if len(parts) > 2 else ""
+
+            def _show_profile_list() -> None:
+                profiles_here = _list_profiles()
                 if not profiles_here:
                     console.print(
                         "[dim]No profiles in ~/.kube-q/profiles/. "
-                        "Create one with [yellow]kq config profile new <name>[/yellow].[/dim]"
+                        "Create one with [yellow]/profile new <name>[/yellow].[/dim]"
                     )
-                else:
-                    active = cfg.profile or "[dim](none)[/dim]"
-                    console.print(f"[dim]Active profile:[/dim] {active}")
-                    console.print("[dim]Available profiles:[/dim]")
-                    for p in profiles_here:
-                        mark = "→" if p == cfg.profile else " "
-                        console.print(f"  {mark} {p}")
+                    return
+                active = cfg.profile or "[dim](none)[/dim]"
+                console.print(f"[dim]Active profile:[/dim] {active}")
+                console.print("[dim]Available profiles:[/dim]")
+                for p in profiles_here:
+                    mark = "→" if p == cfg.profile else " "
+                    console.print(f"  {mark} {p}")
+
+            if not sub or sub == "list":
+                _show_profile_list()
                 console.print(
                     "[dim]Switching profiles mid-session is not supported — "
                     "restart with [yellow]KUBE_Q_PROFILE=<name> kq[/yellow] "
                     "or [yellow]kq --profile <name>[/yellow].[/dim]"
                 )
+            elif sub == "new":
+                if not sub_arg:
+                    console.print("[yellow]Usage: /profile new <name>[/yellow]")
+                else:
+                    _config_cmd.cmd_profile_new(sub_arg)
+            elif sub in ("delete", "rm"):
+                if not sub_arg:
+                    console.print("[yellow]Usage: /profile delete <name>[/yellow]")
+                else:
+                    _config_cmd.cmd_profile_delete(sub_arg)
+            elif sub == "show":
+                if not sub_arg:
+                    console.print("[yellow]Usage: /profile show <name>[/yellow]")
+                else:
+                    _config_cmd.cmd_profile_show(sub_arg)
+            else:
+                # Bare name → legacy "how to switch" hint.
+                console.print(
+                    f"[yellow]To use profile '{sub}', restart kq:[/yellow]\n"
+                    f"  [bold]kq --profile {sub}[/bold]\n"
+                    f"  [bold]KUBE_Q_PROFILE={sub} kq[/bold]"
+                )
+            continue
+
+        if user_input.lower().startswith("/config"):
+            parts = user_input.split(maxsplit=2)
+            sub = parts[1].strip().lower() if len(parts) > 1 else "show"
+            sub_arg = parts[2].strip() if len(parts) > 2 else ""
+            if sub == "show":
+                _config_cmd.cmd_show()
+            elif sub == "set":
+                if not sub_arg or "=" not in sub_arg:
+                    console.print("[yellow]Usage: /config set KEY=VALUE[/yellow]")
+                else:
+                    _config_cmd.cmd_set(sub_arg)
+            elif sub == "reset":
+                _config_cmd.cmd_reset(sub_arg or None)
             else:
                 console.print(
-                    f"[yellow]To use profile '{prof_arg}', restart kq:[/yellow]\n"
-                    f"  [bold]kq --profile {prof_arg}[/bold]\n"
-                    f"  [bold]KUBE_Q_PROFILE={prof_arg} kq[/bold]"
+                    "[yellow]Usage: /config [show|set KEY=VAL|reset [KEY]][/yellow]"
                 )
+            continue
+
+        if user_input.lower() == "/list":
+            _print_sessions_table(store.list_sessions(20))
+            continue
+
+        if user_input.lower() == "/version":
+            try:
+                from importlib.metadata import PackageNotFoundError
+                from importlib.metadata import version as _pkg_version
+                try:
+                    _v = _pkg_version("kube-q")
+                except PackageNotFoundError:
+                    _v = "unknown"
+            except Exception:
+                _v = "unknown"
+            console.print(f"[bold cyan]kube-q[/bold cyan] {_v}")
             continue
 
         if user_input.lower() == "/plugins":
@@ -577,8 +939,20 @@ def run_repl(cfg: ReplConfig) -> None:
                     console.print(f"[dim]Active namespace set to[/dim] [bold]{ns_arg}[/bold]")
             continue
 
-        if user_input.lower() == "/sessions":
-            _print_sessions_table(store.list_sessions(20))
+        if user_input.lower() in ("/sessions", "/resume"):
+            picked = _pick_session_interactive(20)
+            if picked:
+                _resume_session(
+                    state, picked, user_name=user_name, agent_name=agent_name
+                )
+            continue
+
+        if user_input.lower().startswith("/history"):
+            parts = user_input.split(maxsplit=1)
+            arg = parts[1] if len(parts) > 1 else ""
+            _print_history(
+                state.messages, arg, user_name=user_name, agent_name=agent_name
+            )
             continue
 
         if user_input.lower() == "/forget":
@@ -695,7 +1069,7 @@ def run_repl(cfg: ReplConfig) -> None:
                 continue
 
             # Catch typos in unknown slash commands
-            known = list(_SLASH_COMMANDS) + plugin_cmds
+            known = list(_SLASH_COMMANDS) + list(plugin_cmds)
             suggestions = difflib.get_close_matches(cmd, known, n=1, cutoff=0.6)
             if suggestions:
                 console.print(
@@ -767,7 +1141,12 @@ def run_repl(cfg: ReplConfig) -> None:
         state.messages.append({"role": "assistant", "content": response_text})
 
         # ── Persist to local store (best-effort) ──────────────────────────────
-        store.upsert_session(state.conversation_id, state.user_id, state.current_namespace)
+        store.upsert_session(
+            state.conversation_id,
+            state.user_id,
+            state.current_namespace,
+            kube_context=state.current_context,
+        )
         store.append_message(state.conversation_id, "user", user_input, request_id)
         store.append_message(state.conversation_id, "assistant", response_text, request_id)
         if len(state.messages) == 2:  # first exchange

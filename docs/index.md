@@ -104,6 +104,14 @@ hide:
 
     [:octicons-arrow-right-24: Token Tracking](token-tracking.md)
 
+-   :material-swap-horizontal:{ .lg .middle } **Multi-Backend & Multi-Cluster**
+
+    ---
+
+    One CLI, three backends: kube-q server, direct OpenAI, or Azure OpenAI — pick with `--backend`. Switch kubectl context live via `/context`, bundle cluster + keys into named profiles, add custom slash commands with plugins.
+
+    [:octicons-arrow-right-24: Configuration](configuration.md#backend-selection)
+
 </div>
 
 ---

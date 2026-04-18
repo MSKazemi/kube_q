@@ -27,7 +27,7 @@ Usage:
   kq --agent-name MyBot       # assistant name in saved conversations (default: kube-q)
   kq --list                   # list recent sessions and exit
   kq --search "pod crash"     # full-text search across session history and exit
-  kq --session-id <id>        # resume a previous session by ID
+  kq --session-id <id>        # resume a previous session by ID (replays stored transcript)
   kq --model gpt-4o           # override model name sent in requests
   kq --no-health-check        # skip startup health check (useful for web/scripted contexts)
 
@@ -61,34 +61,45 @@ Config (~/.kube-q/.env or ./.env):
   KUBE_Q_TAGLINE=© 2025 Acme Corp     # custom tagline / copyright line
 
 In-REPL commands:
-  /new           — start a new conversation (new conversation ID)
-  /id            — show current conversation ID
-  /state         — show current session state in one line
-  /clear         — clear the terminal screen
-  /save [file]   — save conversation to markdown file
-  /ns <name>     — set active namespace (/ns with no arg clears it)
-  /context <n>   — set kubectl context (/context with no arg lists/clears)
-  /profile [n]   — list profiles / show switch instructions
-  /plugins       — list loaded plugin commands
-  /sessions      — list recent sessions (same as kq --list)
-  /forget        — delete current session from local history
-  /tokens        — show token counts and estimated cost for this session
-  /cost          — alias for /tokens
-  /search <q>    — full-text search across all past sessions
-  /branch        — fork this conversation at the current point
-  /branches      — list all forks of this session
-  /title <text>  — rename the current session
-  /url [new-url] — show or change the backend URL (saves to ~/.kube-q/.env)
-  /approve       — approve a pending HITL action
-  /deny          — deny a pending HITL action
-  /help          — show full in-REPL help
-  /quit          — exit
+  /new                    — start a new conversation (new conversation ID)
+  /id                     — show current conversation ID
+  /state                  — show current session state in one line
+  /clear                  — clear the terminal screen
+  /save [file]            — save conversation to markdown file
+  /ns <name>              — set active namespace (/ns with no arg clears it)
+  /context <n>            — set kubectl context (/context with no arg lists/clears)
+  /profile                — list profiles
+  /profile new <n>        — create a profile .env from template
+  /profile show <n>       — print a profile's contents
+  /profile delete <n>     — delete a profile file
+  /profile <n>            — show restart command to activate profile <n>
+  /config                 — show effective config with each value's source
+  /config set KEY=VAL     — persist KEY=VAL to ~/.kube-q/.env
+  /config reset [KEY]     — remove KEY (or wipe the whole file when no KEY)
+  /plugins                — list loaded plugin commands
+  /sessions               — interactive picker: ↑/↓ + Enter to resume a past session
+  /resume                 — alias for /sessions
+  /list                   — print recent sessions as a table (no picker)
+  /forget                 — delete current session from local history
+  /tokens                 — show token counts and estimated cost for this session
+  /cost                   — alias for /tokens
+  /search <q>             — full-text search across all past sessions
+  /branch                 — fork this conversation at the current point
+  /branches               — list all forks of this session
+  /title <text>           — rename the current session
+  /url [new-url]          — show or change the backend URL (saves to ~/.kube-q/.env)
+  /version                — print the installed kube-q version
+  /approve                — approve a pending HITL action
+  /deny                   — deny a pending HITL action
+  /help                   — show full in-REPL help
+  /quit                   — exit
 
 Keyboard shortcuts:
   Enter          — send message
   Alt+Enter      — insert newline (for multi-line messages)
   Esc → Enter    — insert newline (universal fallback)
-  Tab            — auto-complete slash commands
+  Tab            — auto-complete slash commands, /context, /profile, /ns, and /save paths
+                   (suggestions also pop up as you type "/")
 
 Attaching files:
   @file.yaml                 — embed a file's contents in your message
@@ -231,7 +242,10 @@ def main() -> None:
         "--session-id",
         default=None,
         metavar="ID",
-        help="Resume a previous session by ID (loads history from local store)",
+        help=(
+            "Resume a previous session by ID (loads history from local store "
+            "and replays the transcript in the terminal)"
+        ),
     )
     parser.add_argument(
         "--list",
