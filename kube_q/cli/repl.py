@@ -23,8 +23,8 @@ from prompt_toolkit.styles import Style as PTStyle
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.spinner import Spinner
 from rich.rule import Rule
+from rich.spinner import Spinner
 from rich.text import Text
 
 from kube_q import costs, plugins, store
