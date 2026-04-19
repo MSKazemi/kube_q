@@ -367,25 +367,75 @@ def _fmt_help() -> None:
         "  [yellow]Ctrl+C[/yellow]             Cancel current input (keeps history)\n"
         "  [yellow]Ctrl+D[/yellow]             Exit the session\n\n"
 
+        # ── Connection & config ───────────────────────────────────────────────
+        "[bold cyan]Connection & config[/bold cyan]\n\n"
+        "  [yellow]/url[/yellow]                        Show current backend URL\n"
+        "  [yellow]/url <URL>[/yellow]                  Change backend URL  [dim](saves to ~/.kube-q/.env)[/dim]\n"
+        "  [dim]    /url https://kube-q.example.com[/dim]\n\n"
+        "  [yellow]/config[/yellow]                     Print all keys, values, and their sources\n"
+        "  [yellow]/config set KEY=VALUE[/yellow]       Write a key to ~/.kube-q/.env  [dim](validated)[/dim]\n"
+        "  [dim]    /config set url=https://kube-q.example.com[/dim]\n"
+        "  [dim]    /config set api_key=sk-your-key-here[/dim]\n"
+        "  [dim]    /config set model=kubeintellect-v2[/dim]\n"
+        "  [yellow]/config reset KEY[/yellow]           Remove a single key from ~/.kube-q/.env\n"
+        "  [yellow]/config reset[/yellow]               Wipe ~/.kube-q/.env entirely\n"
+        "  [dim]KEY accepts the env var (KUBE_Q_URL) or the short alias (url).[/dim]\n\n"
+
         # ── Conversation commands ─────────────────────────────────────────────
-        "[bold cyan]Conversation commands[/bold cyan]\n\n"
+        "[bold cyan]Conversation[/bold cyan]\n\n"
         "  [yellow]/new[/yellow]               Start a fresh conversation  [dim](new ID, clears history)[/dim]\n"  # noqa: E501
         "  [yellow]/id[/yellow]                Show the current conversation ID\n"
-        "  [yellow]/state[/yellow]             Show full session state  [dim](ID, namespace, HITL flag)[/dim]\n"  # noqa: E501
+        "  [yellow]/state[/yellow]             Show full session state  [dim](ID, namespace, tokens, HITL flag)[/dim]\n"  # noqa: E501
+        "  [yellow]/title <text>[/yellow]      Rename the current session\n"
+        "  [dim]    /title Production incident — OOM in payment service[/dim]\n"
         "  [yellow]/save[/yellow]              Save conversation to [dim]kube-q-TIMESTAMP.md[/dim]\n"  # noqa: E501
-        "  [yellow]/save <file>[/yellow]        Save conversation to a specific file  [dim](Tab completes paths)[/dim]\n\n"  # noqa: E501
+        "  [yellow]/save <file>[/yellow]       Save to a specific file  [dim](Tab completes paths)[/dim]\n"  # noqa: E501
+        "  [dim]    /save ~/reports/incident-2026-04.md[/dim]\n"
+        "  [yellow]/clear[/yellow]             Clear the terminal screen\n"
+        "  [yellow]/version[/yellow]           Print the installed kube-q version\n"
+        "  [yellow]/help[/yellow]              Show this help\n"
+        "  [yellow]/quit[/yellow]  [dim]/exit  /q[/dim]  Exit kube-q\n\n"
 
         # ── Namespace ─────────────────────────────────────────────────────────
         "[bold cyan]Namespace[/bold cyan]\n\n"
         "  [yellow]/ns <name>[/yellow]          Set active namespace — prepended to every query\n"
         "  [yellow]/ns[/yellow]                 Clear active namespace\n"
-        "  [dim]Tab-completes namespaces from the cluster (cached after first use).[/dim]\n\n"
+        "  [dim]    /ns production[/dim]\n"
+        "  [dim]    /ns kube-system[/dim]\n"
+        "  [dim]Tab-completes from the cluster (cached after first use).[/dim]\n\n"
 
         # ── Kubernetes context ────────────────────────────────────────────────
         "[bold cyan]Kubernetes context[/bold cyan]\n\n"
         "  [yellow]/context <name>[/yellow]     Set active kubectl context — prepended to every query\n"  # noqa: E501
         "  [yellow]/context[/yellow]            Clear active context\n"
-        "  [dim]Tab-completes from your kubeconfig (kubectl config get-contexts).[/dim]\n\n"
+        "  [dim]    /context prod-cluster[/dim]\n"
+        "  [dim]    /context staging-gke[/dim]\n"
+        "  [dim]Tab-completes from your kubeconfig.[/dim]\n\n"
+
+        # ── Session history ───────────────────────────────────────────────────
+        "[bold cyan]Session history[/bold cyan]\n\n"
+        "  [yellow]/sessions[/yellow]           Interactive picker — ↑/↓ navigate, Enter resume, Esc cancel\n"  # noqa: E501
+        "  [yellow]/resume[/yellow]             Alias for [yellow]/sessions[/yellow]\n"
+        "  [yellow]/list[/yellow]               Print recent sessions as a table  "
+        "[dim](no picker)[/dim]\n"
+        "  [yellow]/history[/yellow]            Replay all messages in the current session\n"
+        "  [yellow]/history <N>[/yellow]        Show the last N messages\n"
+        "  [yellow]/history <X-Y>[/yellow]      Show messages X through Y  [dim](1-indexed, inclusive)[/dim]\n"  # noqa: E501
+        "  [yellow]/history #<N>[/yellow]       Show just message #N\n"
+        "  [dim]    /history 5[/dim]\n"
+        "  [dim]    /history 2-8[/dim]\n"
+        "  [dim]    /history #3[/dim]\n"
+        "  [yellow]/forget[/yellow]             Delete current session from local history  "
+        "[dim](server data untouched)[/dim]\n\n"
+
+        # ── Search & branching ────────────────────────────────────────────────
+        "[bold cyan]Search & branching[/bold cyan]\n\n"
+        "  [yellow]/search <query>[/yellow]     Full-text search across all past sessions\n"
+        "  [dim]    /search \"crash loop\" AND production[/dim]\n"
+        "  [dim]    /search pods AND NOT staging[/dim]\n"
+        "  [dim]    /search \"oom killed\" OR \"memory limit\"[/dim]\n"
+        "  [yellow]/branch[/yellow]             Fork this conversation at the current point\n"
+        "  [yellow]/branches[/yellow]           List all forks of (and siblings of) this session\n\n"
 
         # ── Profiles & plugins ────────────────────────────────────────────────
         "[bold cyan]Profiles & plugins[/bold cyan]\n\n"
@@ -393,66 +443,24 @@ def _fmt_help() -> None:
         "  [yellow]/profile new <name>[/yellow]      Create a new profile .env from template\n"
         "  [yellow]/profile show <name>[/yellow]     Print a profile's contents\n"
         "  [yellow]/profile delete <name>[/yellow]   Delete a profile file\n"
-        "  [yellow]/profile <name>[/yellow]          Show restart command to activate a profile  [dim](switching requires restart)[/dim]\n"  # noqa: E501
-        "  [yellow]/plugins[/yellow]                 List loaded plugins from ~/.kube-q/plugins/\n"
-        "  [dim]Profiles are .env fragments per cluster; plugins register extra slash commands.[/dim]\n\n"  # noqa: E501
-
-        # ── Config ────────────────────────────────────────────────────────────
-        "[bold cyan]Config[/bold cyan]\n\n"
-        "  [yellow]/config[/yellow]                  Print effective config with each value's source\n"  # noqa: E501
-        "  [yellow]/config set KEY=VAL[/yellow]      Persist a value to ~/.kube-q/.env  [dim](validated)[/dim]\n"  # noqa: E501
-        "  [yellow]/config reset KEY[/yellow]        Remove a single key from ~/.kube-q/.env\n"
-        "  [yellow]/config reset[/yellow]            Delete ~/.kube-q/.env entirely\n"
-        "  [dim]KEY accepts the env var (KUBE_Q_URL) or its alias (url).[/dim]\n\n"
-
-        # ── Session history ───────────────────────────────────────────────────
-        "[bold cyan]Session history[/bold cyan]\n\n"
-        "  [yellow]/sessions[/yellow]           Pick a past session to resume  "
-        "[dim](↑/↓ navigate, Enter resume, Esc cancel; kube context restored)[/dim]\n"
-        "  [yellow]/resume[/yellow]             Alias for [yellow]/sessions[/yellow]\n"
-        "  [yellow]/list[/yellow]               Print recent sessions as a table  "
-        "[dim](no picker — same data as[/dim] [yellow]kq --list[/yellow][dim])[/dim]\n"
-        "  [yellow]/history[/yellow]            Replay messages in the current session  "
-        "[dim](no args = all)[/dim]\n"
-        "  [yellow]/history <N>[/yellow]        Show the last [bold]N[/bold] messages\n"
-        "  [yellow]/history <X-Y>[/yellow]      Show messages [bold]X[/bold] through [bold]Y[/bold]"
-        "  [dim](1-indexed, inclusive)[/dim]\n"
-        "  [yellow]/history #<N>[/yellow]       Show just message [bold]#N[/bold]\n"
-        "  [yellow]/forget[/yellow]             Delete current session from local history  "
-        "[dim](server data untouched)[/dim]\n\n"
-
-        # ── History & branching ───────────────────────────────────────────────
-        "[bold cyan]History & branching[/bold cyan]\n\n"
-        "  [yellow]/search <query>[/yellow]     Full-text search across all past sessions\n"
-        "  [yellow]/branch[/yellow]             Fork this conversation at the current point\n"
-        "  [yellow]/branches[/yellow]           List all forks of (and siblings of) this session\n"
-        "  [yellow]/title <text>[/yellow]       Rename the current session\n"
-        "  FTS5 boolean syntax supported: [dim]/search pods AND NOT staging[/dim]\n"
-        "  [dim]kq --search \"query\"[/dim]    Same as /search, but from the shell\n\n"
+        "  [yellow]/profile <name>[/yellow]          Show restart command to activate a profile\n"
+        "  [dim]    /profile new staging[/dim]\n"
+        "  [dim]    /profile show staging[/dim]\n"
+        "  [dim]Switching profiles requires a restart: [bold]kq --profile staging[/bold][/dim]\n"
+        "  [yellow]/plugins[/yellow]                 List loaded plugins from ~/.kube-q/plugins/\n\n"
 
         # ── Token usage ───────────────────────────────────────────────────────
         "[bold cyan]Token usage[/bold cyan]\n\n"
-        "  [yellow]/tokens[/yellow]             Show token counts and estimated cost "
-        "for this session\n"
-        "  [yellow]/cost[/yellow]               Alias for [yellow]/tokens[/yellow]\n"
-        "  Override cost rates via [dim]KUBE_Q_COST_PER_1K_PROMPT[/dim] and "
-        "[dim]KUBE_Q_COST_PER_1K_COMPLETION[/dim] env vars.\n\n"
+        "  [yellow]/tokens[/yellow]  [dim]/cost[/dim]    Show token counts and estimated cost for this session\n"  # noqa: E501
+        "  Override rates via [dim]KUBE_Q_COST_PER_1K_PROMPT[/dim] / "
+        "[dim]KUBE_Q_COST_PER_1K_COMPLETION[/dim].\n\n"
 
         # ── HITL (Human-in-the-Loop) ──────────────────────────────────────────
         "[bold cyan]Human-in-the-Loop (HITL)[/bold cyan]\n\n"
-        "  When kube-q proposes a [bold]write action[/bold] (deploy, delete, scale, etc.)\n"
-        "  it pauses and waits for your approval before proceeding.\n\n"
-        "  [yellow]/approve[/yellow]            Approve the pending action — kube-q executes it\n"
-        "  [yellow]/deny[/yellow]               Deny the pending action — nothing is applied\n"
-        "  The prompt changes to [bold yellow]HITL>[/bold yellow] while an action is pending.\n\n"
-
-        # ── Terminal ──────────────────────────────────────────────────────────
-        "[bold cyan]Terminal[/bold cyan]\n\n"
-        "  [yellow]/url[/yellow] [dim][new-url][/dim]        Show or change the backend URL  [dim](saves to ~/.kube-q/.env)[/dim]\n"  # noqa: E501
-        "  [yellow]/version[/yellow]            Print the installed kube-q version\n"
-        "  [yellow]/clear[/yellow]              Clear the terminal screen\n"
-        "  [yellow]/help[/yellow]               Show this help\n"
-        "  [yellow]/quit[/yellow]  [dim]/exit  /q[/dim]   Exit kube-q\n\n"
+        "  When kube-q proposes a [bold]write action[/bold] (deploy, delete, scale…)\n"
+        "  it pauses and shows the command. The prompt changes to [bold yellow]HITL>[/bold yellow].\n\n"
+        "  [yellow]/approve[/yellow]            Execute the pending action\n"
+        "  [yellow]/deny[/yellow]               Cancel it — nothing is applied\n\n"
 
         # ── CLI flags (reminder) ──────────────────────────────────────────────
         "[bold cyan]Useful launch flags[/bold cyan]\n\n"

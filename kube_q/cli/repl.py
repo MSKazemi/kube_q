@@ -574,48 +574,65 @@ def run_repl(cfg: ReplConfig) -> None:
             )
 
         if not connected:
-            deadline = time.monotonic() + startup_retry_timeout
-
             console.print(f"[yellow]Cannot reach {url}{health_path or ''}[/yellow]")
             console.print(f"[dim]  Reason: {reason}[/dim]")
-            console.print(
-                f"[dim]  Retrying every {startup_retry_interval}s "
-                f"for up to {startup_retry_timeout // 60} min…[/dim]\n"
-            )
 
-            attempt = 0
-            try:
-                while not connected and time.monotonic() < deadline:
-                    remaining = int(deadline - time.monotonic())
-                    attempt += 1
-                    status_text = Text.assemble(
-                        (" Waiting for API… ", "cyan"),
-                        (f"attempt {attempt}", "dim"),
-                        (f"  ({remaining}s remaining)", "dim"),
-                    )
-                    with Live(
-                        Spinner("dots", text=status_text),
-                        console=console,
-                        refresh_per_second=4,
-                        transient=True,
-                    ):
-                        time.sleep(min(startup_retry_interval, max(0, remaining)))
+            # "Connection refused" and DNS failures are definitive — nothing will
+            # start listening while we wait, so skip the retry loop immediately.
+            _definitive = any(k in reason for k in ("Connection refused", "DNS resolution failed"))
 
-                    connected, reason = check_health(
-                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
-                        health_path=health_path, auth_scheme=auth_scheme,
-                    )
-            except KeyboardInterrupt:
+            if _definitive or startup_retry_timeout <= 0:
                 console.print(
-                    "\n[dim]Startup wait cancelled — continuing without API connection.[/dim]\n"
+                    "[dim]  Entering offline mode — use [bold]/url <URL>[/bold] or "
+                    "[bold]/config set url=<URL>[/bold] to point at a running backend.[/dim]\n"
                 )
-                connected = False
-                reason = "Cancelled by user"
-
-            if connected:
-                console.print(f"[green]Connected to {url}[/green]\n")
             else:
-                _print_not_connected_panel(url, reason)
+                console.print(
+                    f"[dim]  Retrying every {startup_retry_interval}s "
+                    f"for up to {startup_retry_timeout}s…[/dim]\n"
+                )
+                deadline = time.monotonic() + startup_retry_timeout
+                attempt = 0
+                try:
+                    while not connected and time.monotonic() < deadline:
+                        remaining = int(deadline - time.monotonic())
+                        attempt += 1
+                        status_text = Text.assemble(
+                            (" Waiting for API… ", "cyan"),
+                            (f"attempt {attempt}", "dim"),
+                            (f"  ({remaining}s remaining)", "dim"),
+                        )
+                        with Live(
+                            Spinner("dots", text=status_text),
+                            console=console,
+                            refresh_per_second=4,
+                            transient=True,
+                        ):
+                            time.sleep(min(startup_retry_interval, max(0, remaining)))
+
+                        connected, reason = check_health(
+                            url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
+                            health_path=health_path, auth_scheme=auth_scheme,
+                        )
+                        if connected:
+                            break
+                        if any(k in reason for k in ("Connection refused", "DNS resolution failed")):
+                            console.print(
+                                "[dim]  Connection refused — stopping retry. "
+                                "Use [bold]/url <URL>[/bold] to change the backend.[/dim]"
+                            )
+                            break
+                except KeyboardInterrupt:
+                    console.print(
+                        "\n[dim]Startup wait cancelled — continuing without API connection.[/dim]\n"
+                    )
+                    connected = False
+                    reason = "Cancelled by user"
+
+                if connected:
+                    console.print(f"[green]Connected to {url}[/green]\n")
+                else:
+                    _print_not_connected_panel(url, reason)
 
         _print_logo(connected=connected)
         backend_part = (
