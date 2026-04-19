@@ -26,17 +26,22 @@ Before you begin, make sure you have:
 
 === ":material-package-variant: pipx (recommended)"
 
-    [pipx](https://pipx.pypa.io) installs `kq` in an isolated virtualenv and puts it on your `PATH` — no pollution of your system Python.
+    [pipx](https://pipx.pypa.io) installs `kq` in an isolated virtualenv and puts it on your `PATH` — no pollution of your system Python. Works on Linux, macOS, and Windows.
 
     ```bash
     pip install pipx       # skip if you already have pipx
-    export PATH="$HOME/.local/bin:$PATH"   # ensure pipx is on PATH
+    pipx ensurepath        # adds pipx and installed tools to PATH (all platforms)
+    ```
+
+    Then **restart your shell** (or open a new terminal), and:
+
+    ```bash
     pipx install kube-q
     kq --version
     ```
 
-    !!! tip "Make PATH permanent"
-        Add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc` (or `~/.zshrc`) so `pipx` and `kq` survive new shells.
+    !!! tip "macOS alternative"
+        On macOS, prefer `brew install pipx && pipx ensurepath` — Homebrew keeps pipx itself updated.
 
 === ":material-language-python: pip"
 
