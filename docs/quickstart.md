@@ -30,9 +30,13 @@ Before you begin, make sure you have:
 
     ```bash
     pip install pipx       # skip if you already have pipx
+    export PATH="$HOME/.local/bin:$PATH"   # ensure pipx is on PATH
     pipx install kube-q
     kq --version
     ```
+
+    !!! tip "Make PATH permanent"
+        Add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc` (or `~/.zshrc`) so `pipx` and `kq` survive new shells.
 
 === ":material-language-python: pip"
 
