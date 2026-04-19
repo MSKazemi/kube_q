@@ -63,8 +63,13 @@ Requires Python 3.12+.
 # Start the interactive REPL (connects to https://api.kubeintellect.com by default)
 kq
 
-# Point at a remote API
-kq --url https://kube-q.example.com
+# Save your URL and API key once — takes effect immediately, persists across sessions
+kq
+/config set url=https://kube-q.example.com
+/config set api_key=your-key-here
+
+# Or pass them as flags for a one-off launch
+kq --url https://kube-q.example.com --api-key your-key-here
 
 # Single query and exit
 kq --query "show me all pods in the default namespace"
@@ -142,6 +147,25 @@ kq --session-id <id>
 | `/title <text>` | Rename the current session |
 
 FTS5 boolean syntax is supported: `/search pods AND NOT staging`
+
+### Connection & config
+
+| Command | Description |
+| --- | --- |
+| `/config` | Print every config key, its value, and where it came from |
+| `/config set KEY=VALUE` | Write a key to `~/.kube-q/.env` — validated and takes effect immediately |
+| `/config reset KEY` | Remove a single key from `~/.kube-q/.env` |
+| `/config reset` | Wipe `~/.kube-q/.env` entirely |
+
+`KEY` accepts the full env-var name (`KUBE_Q_URL`) or the short alias (`url`).
+
+```
+/config set url=https://api.kubeintellect.com
+/config set api_key=your-key-here
+/config set model=kubeintellect-v2
+/config reset api_key
+/config
+```
 
 ### Token usage
 
