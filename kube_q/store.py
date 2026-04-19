@@ -10,6 +10,7 @@ from kube_q.cli.store import (  # noqa: F401
     list_branches,
     list_sessions,
     load_messages,
+    load_session_meta,
     log_tokens,
     rename_session,
     search_sessions,
