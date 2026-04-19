@@ -77,7 +77,16 @@ kube-q 1.4.0
 
 ## Step 2 — Configure your backend URL
 
-Save your connection settings once so you never need to type them on every run:
+Save your connection settings once so you never need to type them on every run.
+
+**Option A — from inside the REPL** (easiest, settings take effect immediately):
+
+```
+/config set url=https://kube-q.example.com
+/config set api_key=your-api-key-here
+```
+
+**Option B — before launching** (edit the file directly):
 
 ```bash
 mkdir -p ~/.kube-q

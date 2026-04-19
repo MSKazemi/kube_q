@@ -5,7 +5,7 @@ kube-q — interactive terminal interface for the kube-q API.
 Usage:
   kq                          # interactive REPL
   kq --query "get all pods"   # single query and exit
-  kq --url http://host:8000   # custom API URL
+  kq --url https://api.kubeintellect.com   # custom API URL
   kq --backend openai         # talk directly to OpenAI (bypass kube-q server)
   kq --backend azure          # talk directly to Azure OpenAI
   kq --profile prod           # load ~/.kube-q/profiles/prod.env on top of defaults
@@ -46,7 +46,7 @@ Environment variables:
   KUBE_Q_PLUGIN_DIR=~/.kube-q/plugins   # override plugin directory
 
 Config (~/.kube-q/.env or ./.env):
-  KUBE_Q_URL=http://localhost:8000
+  KUBE_Q_URL=https://api.kubeintellect.com
   KUBE_Q_API_KEY=                  # required only when server auth is enabled
   KUBE_Q_MODEL=kubeintellect-v2
   KUBE_Q_TIMEOUT=120
@@ -87,7 +87,7 @@ In-REPL commands:
   /branch                 — fork this conversation at the current point
   /branches               — list all forks of this session
   /title <text>           — rename the current session
-  /url [new-url]          — show or change the backend URL (saves to ~/.kube-q/.env)
+  /config set url=<URL>   — change the backend URL (saves to ~/.kube-q/.env)
   /version                — print the installed kube-q version
   /approve                — approve a pending HITL action
   /deny                   — deny a pending HITL action
@@ -219,7 +219,7 @@ def main() -> None:
         default=cfg.url,
         help=(
             "kube-q API base URL "
-            "(env: KUBE_Q_URL, config: url, default: http://localhost:8000)"
+            "(env: KUBE_Q_URL, config: url, default: https://api.kubeintellect.com)"
         ),
     )
     parser.add_argument(

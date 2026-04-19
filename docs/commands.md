@@ -6,26 +6,22 @@ All commands start with `/`. Press `Tab` after `/` to see completions with descr
 
 ## Connection & config
 
-Configure the backend URL and API key without leaving `kq`. Settings are written to `~/.kube-q/.env` and take effect on the **next session**.
+Configure the backend URL, API key, and other settings without leaving `kq`. Settings are written to `~/.kube-q/.env` and take effect **immediately** in the current session.
 
 | Command | Description |
 |---|---|
-| `/url` | Show the current backend URL |
-| `/url <URL>` | Change the backend URL and save it to `~/.kube-q/.env` |
 | `/config` | Print every config key, its value, and where it came from |
-| `/config set KEY=VALUE` | Write a key to `~/.kube-q/.env` (validated before saving) |
+| `/config set KEY=VALUE` | Write a key to `~/.kube-q/.env` (validated, takes effect immediately) |
 | `/config reset KEY` | Remove a single key from `~/.kube-q/.env` |
-| `/config reset` | Wipe `~/.kube-q/.env` entirely (asks for confirmation) |
+| `/config reset` | Wipe `~/.kube-q/.env` entirely |
 
-`KEY` accepts either the env-var name (`KUBE_Q_URL`) or the short alias (`url`).
+`KEY` accepts either the full env-var name (`KUBE_Q_URL`) or the short alias (`url`).
 
 **Examples**
 
 ```
-/url https://kube-q.example.com
-
 /config set url=https://kube-q.example.com
-/config set api_key=sk-your-key-here
+/config set api_key=your-key-here
 /config set model=kubeintellect-v2
 
 /config reset api_key

@@ -98,14 +98,12 @@ def _print_not_connected_panel(url: str, reason: str) -> None:
         f"[dim]  Time:   {ts}[/dim]\n"
         f"[dim]  Reason: {reason}[/dim]\n\n"
         "[bold]To configure the backend URL:[/bold]\n"
-        "  [yellow]kq --url http://host:8000[/yellow]"
-        "                    One-time launch flag\n"
-        "  [yellow]export KUBE_Q_URL=http://host:8000[/yellow]"
-        "             Current shell session\n"
-        "  [yellow]/url http://host:8000[/yellow]"
-        "                         Change without restarting\n"
-        "  [yellow]echo 'KUBE_Q_URL=http://...' >> ~/.kube-q/.env[/yellow]"
-        "   Persist permanently\n\n"
+        "  [yellow]kq --url https://api.kubeintellect.com[/yellow]"
+        "          One-time launch flag\n"
+        "  [yellow]export KUBE_Q_URL=https://api.kubeintellect.com[/yellow]"
+        "   Current shell session\n"
+        "  [yellow]/config set url=https://api.kubeintellect.com[/yellow]"
+        "   Persist permanently  [dim](takes effect immediately)[/dim]\n\n"
         "[dim]These commands work offline: "
         "/help  /sessions  /save  /state  /tokens  /search  /branch[/dim]",
         title="[red]Backend not reachable[/red]",
@@ -369,13 +367,10 @@ def _fmt_help() -> None:
 
         # ── Connection & config ───────────────────────────────────────────────
         "[bold cyan]Connection & config[/bold cyan]\n\n"
-        "  [yellow]/url[/yellow]                        Show current backend URL\n"
-        "  [yellow]/url <URL>[/yellow]                  Change backend URL  [dim](saves to ~/.kube-q/.env)[/dim]\n"
-        "  [dim]    /url https://kube-q.example.com[/dim]\n\n"
         "  [yellow]/config[/yellow]                     Print all keys, values, and their sources\n"
-        "  [yellow]/config set KEY=VALUE[/yellow]       Write a key to ~/.kube-q/.env  [dim](validated)[/dim]\n"
-        "  [dim]    /config set url=https://kube-q.example.com[/dim]\n"
-        "  [dim]    /config set api_key=sk-your-key-here[/dim]\n"
+        "  [yellow]/config set KEY=VALUE[/yellow]       Write a key to ~/.kube-q/.env  [dim](validated, takes effect immediately)[/dim]\n"
+        "  [dim]    /config set url=https://api.kubeintellect.com[/dim]\n"
+        "  [dim]    /config set api_key=your-key-here[/dim]\n"
         "  [dim]    /config set model=kubeintellect-v2[/dim]\n"
         "  [yellow]/config reset KEY[/yellow]           Remove a single key from ~/.kube-q/.env\n"
         "  [yellow]/config reset[/yellow]               Wipe ~/.kube-q/.env entirely\n"
@@ -465,7 +460,7 @@ def _fmt_help() -> None:
         # ── CLI flags (reminder) ──────────────────────────────────────────────
         "[bold cyan]Useful launch flags[/bold cyan]\n\n"
         "  [dim]kq --query \"...\"[/dim]           One-shot query, then exit\n"
-        "  [dim]kq --url http://host:8000[/dim]     Connect to a specific API server\n"
+        "  [dim]kq --url https://api.kubeintellect.com[/dim]  Connect to a specific API server\n"
         "  [dim]kq --api-key <key>[/dim]           Authenticate with an API key  [dim](required when server auth is enabled)[/dim]\n"  # noqa: E501
         "  [dim]kq --ca-cert /path/cert.pem[/dim]   Custom CA certificate for TLS\n"
         "  [dim]kq --output plain[/dim]            Plain text output (no markdown)\n"

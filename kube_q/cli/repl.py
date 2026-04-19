@@ -59,7 +59,7 @@ from kube_q.transport import check_health, non_stream_query, stream_query
 @dataclass
 class ReplConfig:
     """All configuration for a single run_repl() invocation."""
-    url: str = "http://localhost:8000"
+    url: str = "https://api.kubeintellect.com"
     stream: bool = True
     initial_conversation_id: str | None = None
     initial_session_id: str | None = None
@@ -114,7 +114,6 @@ _SLASH_COMMANDS: dict[str, str] = {
     "/branch": "fork this conversation at the current point",
     "/branches": "list all forks of this session",
     "/title": "rename the current session",
-    "/url": "show or change the API URL",
     "/context": "set or clear the kubectl context",
     "/profile": "profile management (list / new / show / delete)",
     "/config": "show / set / reset ~/.kube-q/.env keys",
@@ -583,8 +582,7 @@ def run_repl(cfg: ReplConfig) -> None:
 
             if _definitive or startup_retry_timeout <= 0:
                 console.print(
-                    "[dim]  Entering offline mode — use [bold]/url <URL>[/bold] or "
-                    "[bold]/config set url=<URL>[/bold] to point at a running backend.[/dim]\n"
+                    "[dim]  Entering offline mode — use [bold]/config set url=<URL>[/bold] to point at a running backend.[/dim]\n"
                 )
             else:
                 console.print(
@@ -619,7 +617,7 @@ def run_repl(cfg: ReplConfig) -> None:
                         if any(k in reason for k in ("Connection refused", "DNS resolution failed")):
                             console.print(
                                 "[dim]  Connection refused — stopping retry. "
-                                "Use [bold]/url <URL>[/bold] to change the backend.[/dim]"
+                                "Use [bold]/config set url=<URL>[/bold] to change the backend.[/dim]"
                             )
                             break
                 except KeyboardInterrupt:
@@ -882,7 +880,22 @@ def run_repl(cfg: ReplConfig) -> None:
                 if not sub_arg or "=" not in sub_arg:
                     console.print("[yellow]Usage: /config set KEY=VALUE[/yellow]")
                 else:
-                    _config_cmd.cmd_set(sub_arg)
+                    if _config_cmd.cmd_set(sub_arg) == 0:
+                        api_key = os.environ.get("KUBE_Q_API_KEY") or None
+                        url = os.environ.get("KUBE_Q_URL") or url
+                        model = os.environ.get("KUBE_Q_MODEL") or model
+                        raw_key = sub_arg.partition("=")[0].strip().lower()
+                        if raw_key in ("url", "kube_q_url"):
+                            _ok, _reason = check_health(
+                                url, api_key=api_key, ca_cert=ca_cert,
+                                timeout=health_timeout, health_path=health_path,
+                                auth_scheme=auth_scheme,
+                            )
+                            if _ok:
+                                console.print(f"[green]✓ Connected to {url}[/green]")
+                            else:
+                                console.print(f"[red]✗ Cannot reach {url}[/red]")
+                                console.print(f"[dim]  {_reason}[/dim]")
             elif sub == "reset":
                 _config_cmd.cmd_reset(sub_arg or None)
             else:
@@ -1050,23 +1063,11 @@ def run_repl(cfg: ReplConfig) -> None:
             parts = user_input.split(maxsplit=1)
             if len(parts) < 2:
                 console.print(f"[dim]Current backend URL:[/dim] {url}")
-                console.print("[dim]Usage: /url http://host:8000[/dim]")
+                console.print("[dim]Use [bold]/config set url=<URL>[/bold] to change it.[/dim]")
             else:
-                new_url = parts[1].strip()
-                if not (new_url.startswith("http://") or new_url.startswith("https://")):
-                    console.print("[red]URL must start with http:// or https://[/red]")
-                else:
-                    url = new_url
-                    _update_env_url(new_url)
-                    _ok, _reason = check_health(
-                        url, api_key=api_key, ca_cert=ca_cert, timeout=health_timeout,
-                        health_path=health_path, auth_scheme=auth_scheme,
-                    )
-                    if _ok:
-                        console.print(f"[green]✓ Connected to {url}[/green]")
-                    else:
-                        console.print(f"[red]✗ Still cannot reach {url}[/red]")
-                        console.print(f"[dim]  Reason: {_reason}[/dim]")
+                console.print(
+                    f"[dim]Hint: use [bold]/config set url={parts[1].strip()}[/bold] to change the URL.[/dim]"
+                )
             continue
 
         # Plugin slash commands
@@ -1144,7 +1145,7 @@ def run_repl(cfg: ReplConfig) -> None:
             _pending_retry = original_input
             console.print(
                 f"{error_timestamp()}[dim]Request failed — cannot reach {url}\n"
-                f"  Use [yellow]/url http://host:8000[/yellow] to change the backend "
+                f"  Use [yellow]/config set url=<URL>[/yellow] to change the backend "
                 f"or check your connection.\n"
                 f"  Your message is ready to resend.[/dim]"
             )
