@@ -72,7 +72,7 @@ class KubeQClient:
 
     def __init__(
         self,
-        url: str = "http://localhost:8000",
+        url: str = "https://api.kubeintellect.com",
         *,
         api_key: str | None = None,
         ca_cert: str | None = None,
@@ -232,7 +232,7 @@ class AsyncKubeQClient:
 
     def __init__(
         self,
-        url: str = "http://localhost:8000",
+        url: str = "https://api.kubeintellect.com",
         *,
         api_key: str | None = None,
         ca_cert: str | None = None,

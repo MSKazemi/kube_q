@@ -25,7 +25,7 @@ LOG_FILE   = CONFIG_DIR / "kube-q.log"
 class Config:
     """All runtime configuration. CLI args override env vars which override defaults."""
     # Connection
-    url:                    str        = "http://localhost:8000"
+    url:                    str        = "https://api.kubeintellect.com"
     api_key:                str | None = None
 
     # Timeouts (seconds)
@@ -185,7 +185,7 @@ def validate_config(cfg: Config) -> list[str]:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         errors.append(
             f"Invalid URL: {cfg.url!r} — must start with http:// or https:// and include a host.\n"
-            f"  Example: KUBE_Q_URL=http://localhost:8000\n"
+            f"  Example: KUBE_Q_URL=https://api.kubeintellect.com\n"
             f"{_hint('url')}"
         )
 

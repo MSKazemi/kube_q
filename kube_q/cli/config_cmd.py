@@ -171,7 +171,7 @@ def cmd_set(assignment: str) -> int:
     if "=" not in assignment:
         console.print(
             "[red]Usage:[/red] kq config set KEY=VALUE  "
-            "[dim](example: kq config set KUBE_Q_URL=http://host:8000)[/dim]"
+            "[dim](example: kq config set url=https://api.kubeintellect.com)[/dim]"
         )
         return 2
     raw_key, _, value = assignment.partition("=")

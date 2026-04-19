@@ -25,7 +25,7 @@ Shell-exported variables always win over `.env` files. You can mix both — comm
 
 ```bash
 # ── Connection ────────────────────────────────────────────────────────────────
-KUBE_Q_URL=http://localhost:8000        # kube-q API base URL
+KUBE_Q_URL=https://api.kubeintellect.com  # kube-q API base URL
 KUBE_Q_API_KEY=                         # Bearer token (required when server auth is enabled)
 KUBE_Q_MODEL=kubeintellect-v2           # Model name sent in requests
 

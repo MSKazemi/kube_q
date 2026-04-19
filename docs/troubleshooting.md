@@ -16,8 +16,8 @@ Solutions to the most common problems. If your issue isn't here, open an issue o
 **Symptom:** kube-q exits at startup with a message like:
 
 ```
-✗  Cannot reach backend at http://localhost:8000 (Connection refused)
-    Retrying... (attempt 1 / 60, timeout in 295s)
+✗  Cannot reach backend at https://api.kubeintellect.com (Connection refused)
+    Entering offline mode — use /url <URL> or /config set url=<URL> to point at a running backend.
 ```
 
 **Causes and fixes:**

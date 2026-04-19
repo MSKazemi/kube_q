@@ -60,7 +60,7 @@ Requires Python 3.12+.
 ## Quick start
 
 ```bash
-# Start the interactive REPL (connects to localhost:8000 by default)
+# Start the interactive REPL (connects to https://api.kubeintellect.com by default)
 kq
 
 # Point at a remote API
@@ -194,7 +194,7 @@ kq [options]
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--url URL` | `http://localhost:8000` | kube-q API base URL (env: `KUBE_Q_URL`) |
+| `--url URL` | `https://api.kubeintellect.com` | kube-q API base URL (env: `KUBE_Q_URL`) |
 | `--query` / `-q TEXT` | — | Run a single query and exit |
 | `--no-stream` | off | Disable streaming — wait for full response |
 | `--session-id ID` | — | Resume a previous session by ID — replays the stored transcript on launch (use `/sessions` inside the REPL for an arrow-key picker) |
@@ -298,7 +298,7 @@ Shell-exported variables always win over `.env` files.
 ### All supported variables
 
 ```bash
-KUBE_Q_URL=http://localhost:8000
+KUBE_Q_URL=https://api.kubeintellect.com
 KUBE_Q_API_KEY=your-key-here
 KUBE_Q_MODEL=kubeintellect-v2
 KUBE_Q_TIMEOUT=120

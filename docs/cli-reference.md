@@ -10,7 +10,7 @@ kq [options]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--url URL` | `http://localhost:8000` | kube-q API base URL (env: `KUBE_Q_URL`) |
+| `--url URL` | `https://api.kubeintellect.com` | kube-q API base URL (env: `KUBE_Q_URL`) |
 | `--query TEXT` / `-q TEXT` | — | Run a single query and exit (non-interactive) |
 | `--no-stream` | off | Disable streaming — wait for full response |
 | `--session-id ID` | — | Resume a previous session by ID — loads history from the local store **and replays the stored transcript on launch** (user turns in green, assistant turns as markdown). For interactive picking use `/sessions` or `/resume` inside the REPL. |
