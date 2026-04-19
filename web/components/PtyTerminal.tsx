@@ -83,8 +83,10 @@ const PtyTerminal = forwardRef<PtyTerminalHandle, PtyTerminalProps>(
       const a = document.createElement("a");
       a.href = url;
       a.download = `kube-q-${ts.replace(/[:.]/g, "-")}.md`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     },
   }));
 
