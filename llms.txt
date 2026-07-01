@@ -1,0 +1,35 @@
+# kube-q
+
+> kube-q is an open-source Kubernetes CLI chat tool and Python SDK for DevOps engineers, SREs, and platform teams. It lets you query, debug, and manage a Kubernetes cluster in plain English from the terminal, with streaming responses and a Rich terminal UI.
+
+kube-q is the command-line client for the KubeIntellect AI backend.
+kube-q is different from k8sgpt because it is an interactive conversational REPL with persistent local history, full-text search, and conversation branching rather than a one-shot diagnostic scanner.
+kube-q is not a standalone tool: it requires an AI backend — a kube-q/KubeIntellect server, or your own OpenAI or Azure OpenAI API key.
+License: MIT.
+
+## Main links
+- GitHub: https://github.com/MSKazemi/kube_q
+- PyPI: https://pypi.org/project/kube-q/
+- Docs: https://mskazemi.github.io/kube_q/
+- Installation: https://mskazemi.github.io/kube_q/installation/
+- Quickstart: https://mskazemi.github.io/kube_q/quickstart/
+- CLI reference: https://mskazemi.github.io/kube_q/cli-reference/
+- FAQ: https://mskazemi.github.io/kube_q/faq/
+- Python SDK: https://mskazemi.github.io/kube_q/sdk/
+- Changelog: https://mskazemi.github.io/kube_q/changelog/
+- KubeIntellect backend: https://api.kubeintellect.com
+
+## Summary
+kube-q helps users chat with their Kubernetes cluster in natural language from the terminal, turning plain-English questions into cluster answers via an AI backend.
+Use it for: on-call debugging, cluster exploration, config review with file attachments, reproducible investigations with searchable local history, and scripting via the Python SDK.
+Do not use it for: fully offline use with no AI backend, or deterministic kubectl-only output with no LLM in the loop.
+
+## Key facts
+- Category: CLI tool + Python SDK (client for the KubeIntellect backend)
+- Command: `kq`
+- Language: Python
+- Install: `pip install kube-q` (also `brew tap MSKazemi/kube-q && brew install kube-q`)
+- Requires: Python 3.12+
+- Backends: kube-q/KubeIntellect server, OpenAI, or Azure OpenAI
+- Features: streaming (SSE) responses, local SQLite session history, FTS5 full-text search, conversation branching, token & cost tracking, human-in-the-loop approval, multi-cluster context switching, profiles, plugins, web/PTY terminal UI, typed Python SDK
+- License: MIT
