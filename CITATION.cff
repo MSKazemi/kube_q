@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use kube-q, please cite it using the metadata in this file."
+title: "kube-q: chat with your Kubernetes cluster from the terminal"
+abstract: >-
+  kube-q is an open-source command-line interface and Python SDK for chatting
+  with a Kubernetes cluster in plain English from the terminal. It is the client
+  for the KubeIntellect AI backend, with streaming responses, local session
+  history, full-text search, conversation branching, token cost tracking,
+  human-in-the-loop approval, and a Rich terminal UI.
+type: software
+authors:
+  - family-names: "Seyedkazemi Ardebili"
+    given-names: "Mohsen"
+    email: "mohsen.seyedkazemi@gmail.com"
+repository-code: "https://github.com/MSKazemi/kube_q"
+url: "https://mskazemi.github.io/kube_q/"
+license: MIT
+keywords:
+  - kubernetes
+  - kubectl
+  - cli
+  - devops
+  - sre
+  - platform-engineering
+  - llm
+  - ai
+  - chatbot
+  - terminal
