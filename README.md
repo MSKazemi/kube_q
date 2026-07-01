@@ -6,6 +6,18 @@
 
 [![Docs](https://img.shields.io/badge/docs-mskazemi.github.io%2Fkube__q-teal)](https://mskazemi.github.io/kube_q/)
 [![PyPI](https://img.shields.io/pypi/v/kube-q)](https://pypi.org/project/kube-q/)
+[![Python](https://img.shields.io/pypi/pyversions/kube-q)](https://pypi.org/project/kube-q/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+---
+
+## What is kube-q?
+
+kube-q is an open-source Kubernetes CLI chat tool and Python SDK for DevOps engineers, SREs, and platform teams who want to query, debug, and manage a cluster in plain English from the terminal. It is the command-line client for the KubeIntellect backend, turning natural-language questions into answers about your cluster with streaming responses and a Rich terminal UI. Use kube-q when you want a persistent, searchable, branchable conversation with your Kubernetes cluster instead of memorizing `kubectl` flags. kube-q is different from `k8sgpt` because it is an interactive conversational REPL with saved history, full-text search, and multi-backend support rather than a one-shot diagnostic scanner. kube-q is **not** a standalone tool: it requires an AI backend — a kube-q/KubeIntellect server, or your own OpenAI or Azure OpenAI API key.
+
+**What it does:** lets you chat with your Kubernetes cluster in natural language (`kubectl` in plain English) from the terminal.
+**Who it's for:** DevOps engineers, SREs, and platform engineers working with `kubectl` and Kubernetes daily.
+**Why it's useful:** streaming answers, local session history, full-text search, conversation branching, cost tracking, and human-in-the-loop approval — all in one CLI plus a typed Python SDK.
 
 ---
 
@@ -553,6 +565,71 @@ To require a token before clients can spawn `kq`, set `PTY_AUTH_TOKEN` on the se
 
 ---
 
+## Use cases
+
+- **On-call debugging** — ask "why are my pods in `payments` crash-looping?" and get a streamed answer without recalling `kubectl` flags.
+- **Cluster exploration** — list deployments, services, and events in plain English across multiple clusters with live `/context` switching.
+- **Config review** — attach manifests with `@deployment.yaml` and ask what is wrong or how two configs differ.
+- **Reproducible investigations** — every conversation is saved locally; search past incidents with `kq --search "pod crash"` and branch a conversation to explore alternatives.
+- **Scripting & automation** — drive the same backend from Python with the `KubeQClient` SDK, using typed streaming events.
+- **Team access** — expose a browser terminal (`/pty`) so teammates can use `kq` from the web with optional token auth.
+
+## Comparison & alternatives
+
+kube-q is one of several tools for talking to Kubernetes with an LLM. Pick the one that matches your workflow.
+
+| | kube-q | k8sgpt | kubectl-ai |
+| --- | --- | --- | --- |
+| Primary mode | Interactive conversational REPL + Python SDK | One-shot cluster scan / diagnosis (CLI + operator) | Natural-language → `kubectl` command generation |
+| Session history | Local SQLite, resume, full-text search, branching | Not a chat history focus | Not a chat history focus |
+| Backends | kube-q/KubeIntellect server, OpenAI, or Azure OpenAI | Multiple LLM providers | Multiple LLM providers |
+| Needs a separate backend/API | Yes — server or your own OpenAI/Azure key | Yes — an LLM API key | Yes — an LLM API key |
+| Extras | Streaming, HITL approval, cost tracking, plugins, web/PTY UI | Analyzers, integrations, operator mode | Tight `kubectl` command loop |
+| License | MIT | Open source | Open source |
+
+If you mainly want automated problem detection, `k8sgpt` is a strong fit. If you mainly want an LLM to write and run `kubectl` commands, `kubectl-ai` fits well. Choose kube-q when you want a persistent, searchable, branchable **conversation** with your cluster, a typed Python SDK, and the option to point the same CLI at a managed backend or your own OpenAI/Azure keys.
+
+## When to use / when NOT to use
+
+**Use it when:** you want to chat with Kubernetes from the terminal, keep a searchable local history of investigations, branch conversations, track token cost, and gate destructive actions behind human approval — from either the CLI or a Python script.
+
+**Don't use it when:** you have no AI backend available (kube-q needs a kube-q/KubeIntellect server or an OpenAI/Azure OpenAI key), you need a fully offline tool, or you only want deterministic `kubectl` output with no LLM in the loop.
+
+## Limitations
+
+- **Requires an AI backend.** kube-q is a client; it does not run an LLM itself. You need a kube-q/KubeIntellect server or your own OpenAI/Azure OpenAI API key.
+- **Cluster capabilities depend on the backend.** What kube-q can actually do against your cluster is determined by the connected backend, not the CLI.
+- **Beta software.** kube-q is in active development (Development Status: Beta).
+- **Cost figures are estimates.** `/tokens` cost numbers are labeled "Est." and depend on configured per-model rates.
+- **Requires Python 3.12+.**
+
+## FAQ
+
+**What is kube_q?**
+kube-q (repository `kube_q`, PyPI package `kube-q`, command `kq`) is an open-source CLI and Python SDK for chatting with your Kubernetes cluster in plain English from the terminal. It is the client for the KubeIntellect AI backend.
+
+**How do I chat with Kubernetes from the terminal?**
+Install it with `pip install kube-q`, then run `kq` to open the interactive REPL, or `kq --query "show me all pods in the default namespace"` for a single question. kube-q connects to an AI backend and streams the answer back to your terminal.
+
+**How is kube_q different from k8sgpt?**
+`k8sgpt` is primarily a one-shot diagnostic scanner that analyzes a cluster and reports issues. kube-q is an interactive conversational REPL with persistent local history, full-text search, conversation branching, cost tracking, and a Python SDK. They solve overlapping but different problems; you can use both.
+
+**Is kube-q free and open source?**
+Yes. kube-q is released under the MIT License.
+
+**How do I install kube-q?**
+`pip install kube-q`, or `brew tap MSKazemi/kube-q && brew install kube-q`, or install from source. Requires Python 3.12+.
+
+**Does kube-q need an API key or backend?**
+Yes. kube-q talks to an AI backend — a kube-q/KubeIntellect server, or a direct OpenAI or Azure OpenAI endpoint selected with `--backend`. Set the key via `--api-key`/`KUBE_Q_API_KEY` (or the provider-specific keys).
+
+**Is kube-q production-ready?**
+kube-q is in active development and labeled Beta. It is usable day to day; evaluate it against your own requirements before relying on it for critical operations.
+
+## Citation
+
+If you use kube-q in your work, please cite it. Citation metadata is in [CITATION.cff](CITATION.cff), and GitHub renders a "Cite this repository" button from it.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Mohsen Seyedkazemi Ardebili.
