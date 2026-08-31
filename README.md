@@ -4,7 +4,7 @@
 
 `kube-q` is an interactive CLI (`kq`) that connects to an AI-powered backend and lets you query, debug, and manage your cluster in plain English — with streaming responses, persistent session history, full-text search, conversation branching, token cost tracking, human-in-the-loop approval flows, and rich terminal rendering.
 
-[![Docs](https://img.shields.io/badge/docs-mskazemi.github.io%2Fkube__q-teal)](https://mskazemi.github.io/kube_q/)
+[![Docs](https://img.shields.io/badge/docs-mskazemi.com%2Fkube__q-teal)](https://mskazemi.com/kube_q/)
 [![PyPI](https://img.shields.io/pypi/v/kube-q)](https://pypi.org/project/kube-q/)
 [![Python](https://img.shields.io/pypi/pyversions/kube-q)](https://pypi.org/project/kube-q/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
