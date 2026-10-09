@@ -632,4 +632,4 @@ If you use kube-q in your work, please cite it. Citation metadata is in [CITATIO
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Mohsen Seyedkazemi Ardebili.
+[MIT](LICENSE)
