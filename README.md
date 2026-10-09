@@ -614,8 +614,8 @@ Install it with `pip install kube-q`, then run `kq` to open the interactive REPL
 **How is kube_q different from k8sgpt?**
 `k8sgpt` is primarily a one-shot diagnostic scanner that analyzes a cluster and reports issues. kube-q is an interactive conversational REPL with persistent local history, full-text search, conversation branching, cost tracking, and a Python SDK. They solve overlapping but different problems; you can use both.
 
-**Is kube-q free and open source?**
-Yes. kube-q is released under the MIT License.
+**Is kube-q open source?**
+Yes. kube-q is open source, released under the MIT License.
 
 **How do I install kube-q?**
 `pip install kube-q`, or `brew tap MSKazemi/kube-q && brew install kube-q`, or install from source. Requires Python 3.12+.
